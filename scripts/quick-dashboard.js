@@ -3,6 +3,15 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+// Handle running via Electron CLI
+let app = null;
+try {
+  app = require('electron').app;
+} catch (e) {
+  // Running via regular node - that's fine if better-sqlite3 works
+}
+
 const Database = require('better-sqlite3');
 
 // Database path
@@ -384,7 +393,7 @@ function generateHTML(data, date) {
 </html>`;
 }
 
-function main() {
+function generateDashboard() {
   const date = getTodayDate();
 
   // Ensure reports directory exists
@@ -392,16 +401,31 @@ function main() {
     fs.mkdirSync(REPORTS_DIR, { recursive: true });
   }
 
+  const data = getDataForDate(date);
+  const html = generateHTML(data, date);
+  const outputPath = path.join(REPORTS_DIR, 'dashboard.html');
+  fs.writeFileSync(outputPath, html);
+  console.log(outputPath);
+  return outputPath;
+}
+
+// If running via Electron, wait for app ready then quit
+if (app) {
+  app.whenReady().then(() => {
+    try {
+      generateDashboard();
+    } catch (err) {
+      console.error('Error generating dashboard:', err.message);
+      process.exitCode = 1;
+    }
+    app.quit();
+  });
+} else {
+  // Running via regular node
   try {
-    const data = getDataForDate(date);
-    const html = generateHTML(data, date);
-    const outputPath = path.join(REPORTS_DIR, 'dashboard.html');
-    fs.writeFileSync(outputPath, html);
-    console.log(outputPath);
+    generateDashboard();
   } catch (err) {
     console.error('Error generating dashboard:', err.message);
     process.exit(1);
   }
 }
-
-main();
