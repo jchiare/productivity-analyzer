@@ -1,3 +1,8 @@
+// Catch any early crashes
+process.on('uncaughtException', (error) => {
+  console.error('UNCAUGHT EXCEPTION:', error);
+});
+
 const { app, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
 const { initDatabase, getCategoryStats, getDaySummary, cleanupOldData, closeDatabase } = require('./database');

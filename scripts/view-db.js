@@ -2,7 +2,9 @@
 
 /**
  * Simple CLI to view productivity database contents
- * Usage: node scripts/view-db.js [command] [options]
+ * Uses macOS built-in sqlite3 command to avoid native module issues
+ *
+ * Usage: node scripts/view-db.js [command]
  *
  * Commands:
  *   today     - Show today's summary
@@ -12,9 +14,10 @@
  *   dates     - Show all dates with data
  */
 
+const { execSync } = require('child_process');
 const path = require('path');
 const os = require('os');
-const Database = require('better-sqlite3');
+const fs = require('fs');
 
 const DB_PATH = path.join(
   os.homedir(),
@@ -28,73 +31,75 @@ function getTodayDate() {
   return new Date().toISOString().split('T')[0];
 }
 
-function formatMinutes(mins) {
-  if (mins < 1) return '< 1m';
-  if (mins < 60) return `${Math.round(mins)}m`;
-  const hours = Math.floor(mins / 60);
-  const m = Math.round(mins % 60);
-  return m === 0 ? `${hours}h` : `${hours}h ${m}m`;
+function runQuery(sql) {
+  try {
+    const result = execSync(`sqlite3 -header -column "${DB_PATH}" "${sql}"`, {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024
+    });
+    return result.trim();
+  } catch (error) {
+    if (error.status === 1 && !error.stdout) {
+      return ''; // Empty result
+    }
+    throw error;
+  }
 }
 
 function main() {
-  const fs = require('fs');
+  console.log('Database:', DB_PATH);
+  console.log('');
 
   if (!fs.existsSync(DB_PATH)) {
-    console.log('Database not found at:', DB_PATH);
-    console.log('Run the app first to create the database.');
+    console.log('Database not found!');
+    console.log('Run the Electron app first to create the database.');
     process.exit(1);
   }
 
-  const db = new Database(DB_PATH, { readonly: true });
   const command = process.argv[2] || 'today';
   const today = getTodayDate();
-
-  console.log('Database:', DB_PATH);
-  console.log('');
 
   switch (command) {
     case 'today': {
       console.log(`=== Today's Summary (${today}) ===\n`);
 
-      const totals = db.prepare(`
+      const result = runQuery(`
         SELECT
-          COUNT(*) as total,
-          SUM(CASE WHEN is_idle = 0 THEN 1 ELSE 0 END) as active,
-          SUM(CASE WHEN is_idle = 1 THEN 1 ELSE 0 END) as idle
-        FROM activity_log WHERE date = ?
-      `).get(today);
+          COUNT(*) as total_records,
+          SUM(CASE WHEN is_idle = 0 THEN 1 ELSE 0 END) as active_records,
+          SUM(CASE WHEN is_idle = 1 THEN 1 ELSE 0 END) as idle_records,
+          ROUND(SUM(CASE WHEN is_idle = 0 THEN 1 ELSE 0 END) * 5.0 / 60, 1) as active_minutes,
+          ROUND(SUM(CASE WHEN is_idle = 1 THEN 1 ELSE 0 END) * 5.0 / 60, 1) as idle_minutes
+        FROM activity_log
+        WHERE date = '${today}'
+      `);
 
-      if (!totals || totals.total === 0) {
+      if (result) {
+        console.log(result);
+      } else {
         console.log('No data recorded today yet.');
-        break;
       }
-
-      console.log(`Active time: ${formatMinutes((totals.active || 0) * 5 / 60)}`);
-      console.log(`Idle time:   ${formatMinutes((totals.idle || 0) * 5 / 60)}`);
-      console.log(`Total records: ${totals.total}`);
       break;
     }
 
     case 'recent': {
       console.log('=== Last 20 Activity Records ===\n');
 
-      const records = db.prepare(`
-        SELECT timestamp, app_name, window_title, category, is_idle
+      const result = runQuery(`
+        SELECT
+          substr(timestamp, 12, 8) as time,
+          COALESCE(app_name, '(idle)') as app,
+          category,
+          substr(COALESCE(window_title, ''), 1, 40) as title
         FROM activity_log
         ORDER BY timestamp DESC
         LIMIT 20
-      `).all();
+      `);
 
-      if (records.length === 0) {
+      if (result) {
+        console.log(result);
+      } else {
         console.log('No records found.');
-        break;
-      }
-
-      for (const r of records) {
-        const time = r.timestamp.split('T')[1].split('.')[0];
-        const app = r.app_name || '(idle)';
-        const title = r.window_title ? r.window_title.substring(0, 40) : '';
-        console.log(`${time} | ${app.padEnd(20)} | ${r.category.padEnd(12)} | ${title}`);
       }
       break;
     }
@@ -102,23 +107,23 @@ function main() {
     case 'apps': {
       console.log(`=== Top Apps Today (${today}) ===\n`);
 
-      const apps = db.prepare(`
-        SELECT app_name, category, COUNT(*) as count,
-               ROUND(COUNT(*) * 5.0 / 60, 1) as minutes
+      const result = runQuery(`
+        SELECT
+          app_name,
+          category,
+          COUNT(*) as records,
+          ROUND(COUNT(*) * 5.0 / 60, 1) as minutes
         FROM activity_log
-        WHERE date = ? AND is_idle = 0 AND app_name IS NOT NULL
+        WHERE date = '${today}' AND is_idle = 0 AND app_name IS NOT NULL
         GROUP BY app_name
-        ORDER BY count DESC
+        ORDER BY records DESC
         LIMIT 15
-      `).all(today);
+      `);
 
-      if (apps.length === 0) {
+      if (result) {
+        console.log(result);
+      } else {
         console.log('No app data today.');
-        break;
-      }
-
-      for (const app of apps) {
-        console.log(`${formatMinutes(app.minutes).padStart(8)} | ${app.app_name.padEnd(25)} | ${app.category}`);
       }
       break;
     }
@@ -126,23 +131,21 @@ function main() {
     case 'stats': {
       console.log(`=== Category Breakdown Today (${today}) ===\n`);
 
-      const stats = db.prepare(`
-        SELECT category, COUNT(*) as count,
-               ROUND(COUNT(*) * 5.0 / 60, 1) as minutes
+      const result = runQuery(`
+        SELECT
+          category,
+          COUNT(*) as records,
+          ROUND(COUNT(*) * 5.0 / 60, 1) as minutes
         FROM activity_log
-        WHERE date = ?
+        WHERE date = '${today}'
         GROUP BY category
-        ORDER BY count DESC
-      `).all(today);
+        ORDER BY records DESC
+      `);
 
-      if (stats.length === 0) {
+      if (result) {
+        console.log(result);
+      } else {
         console.log('No data today.');
-        break;
-      }
-
-      for (const s of stats) {
-        const bar = '█'.repeat(Math.min(30, Math.round(s.minutes)));
-        console.log(`${s.category.padEnd(15)} ${formatMinutes(s.minutes).padStart(8)} ${bar}`);
       }
       break;
     }
@@ -150,20 +153,17 @@ function main() {
     case 'dates': {
       console.log('=== Dates with Activity Data ===\n');
 
-      const dates = db.prepare(`
+      const result = runQuery(`
         SELECT date, COUNT(*) as records
         FROM activity_log
         GROUP BY date
         ORDER BY date DESC
-      `).all();
+      `);
 
-      if (dates.length === 0) {
+      if (result) {
+        console.log(result);
+      } else {
         console.log('No data recorded yet.');
-        break;
-      }
-
-      for (const d of dates) {
-        console.log(`${d.date}: ${d.records} records`);
       }
       break;
     }
@@ -172,8 +172,6 @@ function main() {
       console.log('Unknown command:', command);
       console.log('\nAvailable commands: today, recent, apps, stats, dates');
   }
-
-  db.close();
 }
 
 main();
