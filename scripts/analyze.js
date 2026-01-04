@@ -4,6 +4,14 @@ const Anthropic = require('@anthropic-ai/sdk');
 const path = require('path');
 const fs = require('fs');
 
+// Handle running via Electron CLI for native module compatibility
+let app = null;
+try {
+  app = require('electron').app;
+} catch (e) {
+  // Running via regular node
+}
+
 // Load environment variables from .env file
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
@@ -206,6 +214,7 @@ async function main() {
     if (data.summary.total_active_minutes === 0 && data.summary.total_idle_minutes === 0) {
       console.log(`\nNo activity data found for ${date}`);
       console.log('Make sure the productivity tracker was running on this date.');
+      if (app) app.quit();
       process.exit(1);
     }
 
@@ -238,10 +247,14 @@ async function main() {
 
   } catch (error) {
     console.error('\nError during analysis:', error.message);
+    if (app) app.quit();
     process.exit(1);
   } finally {
     closeDatabase();
   }
+
+  // Exit cleanly when running via Electron
+  if (app) app.quit();
 }
 
 main();

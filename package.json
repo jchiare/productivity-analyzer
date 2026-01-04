@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dashboard": "electron scripts/quick-dashboard.js && open reports/dashboard.html",
-    "analyze": "node scripts/analyze.js",
+    "analyze": "electron scripts/analyze.js",
     "report": "node scripts/generate-report.js",
     "db": "node scripts/view-db.js",
     "postinstall": "electron-rebuild"
