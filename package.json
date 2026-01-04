@@ -19,5 +19,7 @@
     "dotenv": "^17.2.3",
     "electron": "^39.2.7"
   },
-  "devDependencies": {"@electron/rebuild": "^3.7.1"}
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1"
+  }
 }
