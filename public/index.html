@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Productivity Dashboard</title>
+  <style>
+    :root {
+      --primary: #3B82F6;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+      --gray-50: #F9FAFB;
+      --gray-100: #F3F4F6;
+      --gray-200: #E5E7EB;
+      --gray-500: #6B7280;
+      --gray-600: #4B5563;
+      --gray-700: #374151;
+      --gray-900: #111827;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6; color: var(--gray-900); background: var(--gray-50); padding: 2rem;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 2rem; }
+    h1 { font-size: 1.75rem; font-weight: 700; }
+    .date { color: var(--gray-500); font-size: 1rem; margin-top: 0.25rem; }
+    .live-badge {
+      display: inline-block; background: var(--success); color: white;
+      padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem;
+      font-weight: 600; margin-left: 0.5rem; animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+    .action-bar {
+      display: flex; justify-content: center; gap: 1rem; margin-bottom: 1.5rem;
+    }
+    .action-btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: 600;
+      font-size: 0.875rem; cursor: pointer; border: none; transition: all 0.2s;
+    }
+    .action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .action-btn-primary {
+      background: linear-gradient(135deg, #8B5CF6, #6366F1); color: white;
+    }
+    .action-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4); }
+    .action-btn-secondary {
+      background: white; color: var(--gray-700); border: 1px solid var(--gray-200);
+    }
+    .action-btn-secondary:hover:not(:disabled) { background: var(--gray-50); }
+
+    .summary-bar {
+      background: white; border-radius: 1rem; padding: 1.5rem;
+      margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      display: flex; justify-content: space-around; flex-wrap: wrap; gap: 1rem;
+    }
+    .stat { text-align: center; }
+    .stat-value { font-size: 2rem; font-weight: 700; color: var(--gray-900); }
+    .stat-label { font-size: 0.875rem; color: var(--gray-500); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+    .card { background: white; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: var(--gray-900); }
+
+    .chart-container { display: flex; align-items: flex-start; gap: 1.5rem; flex-wrap: wrap; }
+    .legend { flex: 1; min-width: 200px; }
+    .legend-item {
+      display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;
+      font-size: 0.8rem; padding: 0.4rem 0.5rem; border-radius: 0.375rem;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .legend-item:hover { background: var(--gray-100); }
+    .legend-color { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+    .legend-label { flex: 1; color: var(--gray-700); }
+    .legend-value { color: var(--gray-500); font-variant-numeric: tabular-nums; }
+
+    .hourly-heatmap { margin-top: 0.5rem; }
+    .heatmap-grid { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+    .hour-cell {
+      aspect-ratio: 1; border-radius: 4px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; font-size: 0.6rem; color: white; min-height: 36px;
+    }
+    .hour-cell.current-hour { box-shadow: 0 0 0 2px var(--primary); }
+    .hour-label { font-weight: 600; }
+    .hour-value { font-size: 0.5rem; opacity: 0.9; }
+    .heatmap-labels { display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.7rem; color: var(--gray-500); }
+
+    .top-apps-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .top-apps-table th, .top-apps-table td { padding: 0.6rem; text-align: left; border-bottom: 1px solid var(--gray-200); }
+    .top-apps-table th { font-weight: 600; color: var(--gray-500); font-size: 0.75rem; }
+    .rank { width: 30px; color: var(--gray-500); }
+    .app-name { font-weight: 500; }
+    .app-time { font-variant-numeric: tabular-nums; color: var(--gray-700); }
+    .category-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.65rem; font-weight: 500; color: white; }
+
+    .no-data { color: var(--gray-500); font-style: italic; text-align: center; padding: 2rem; }
+    .error-message { color: var(--danger); padding: 1rem; background: #FEF2F2; border-radius: 0.5rem; text-align: center; }
+    footer { text-align: center; margin-top: 2rem; color: var(--gray-500); font-size: 0.8rem; }
+
+    /* Analysis Section */
+    .analysis-section { margin-top: 1.5rem; }
+    .summary-card-analysis {
+      background: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 1.5rem;
+    }
+    .score-circle {
+      width: 100px; height: 100px; border-radius: 50%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0;
+    }
+    .score-value { font-size: 2rem; line-height: 1; }
+    .score-label { font-size: 0.75rem; opacity: 0.8; }
+    .score-high { background: linear-gradient(135deg, #10B981, #34D399); color: white; }
+    .score-medium { background: linear-gradient(135deg, #F59E0B, #FBBF24); color: white; }
+    .score-low { background: linear-gradient(135deg, #EF4444, #F87171); color: white; }
+    .summary-text { flex: 1; }
+    .summary-main { font-size: 1rem; color: var(--gray-700); margin-bottom: 0.5rem; }
+    .summary-justification { font-size: 0.875rem; color: var(--gray-500); font-style: italic; }
+
+    .insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .insight-card { background: white; border-radius: 1rem; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .insight-card h3 { font-size: 1rem; margin-bottom: 0.75rem; color: var(--gray-900); }
+    .insight-stat { font-size: 1.75rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem; }
+    .insight-card p { font-size: 0.875rem; color: var(--gray-600); margin-bottom: 0.25rem; }
+    .insight-note { font-style: italic; color: var(--gray-500); }
+    .insight-list { list-style: none; margin-top: 0.5rem; padding-left: 0; }
+    .insight-list li { padding: 0.25rem 0; padding-left: 1rem; position: relative; font-size: 0.875rem; color: var(--gray-600); }
+    .insight-list li::before { content: "\2022"; position: absolute; left: 0; color: var(--primary); }
+
+    .recommendations { margin-top: 0.5rem; }
+    .recommendation {
+      display: flex; gap: 1rem; padding: 1rem; background: var(--gray-50);
+      border-radius: 0.5rem; margin-bottom: 0.75rem;
+    }
+    .rec-number {
+      width: 28px; height: 28px; background: var(--primary); color: white;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 0.875rem; flex-shrink: 0;
+    }
+    .rec-content h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .rec-content p { color: var(--gray-600); font-size: 0.85rem; }
+
+    .highlights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .highlight-card { background: white; border-radius: 1rem; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .highlight-card h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+    .highlight-card ul { list-style: none; padding-left: 0; }
+    .highlight-card li { padding: 0.35rem 0; padding-left: 1rem; position: relative; font-size: 0.875rem; color: var(--gray-700); }
+    .highlight-positive { border-left: 4px solid var(--success); }
+    .highlight-positive li::before { content: "\2713"; position: absolute; left: 0; color: var(--success); }
+    .highlight-improve { border-left: 4px solid var(--warning); }
+    .highlight-improve li::before { content: "\2192"; position: absolute; left: 0; color: var(--warning); }
+
+    .patterns-list { list-style: none; padding-left: 0; }
+    .patterns-list li { padding: 0.5rem 0; padding-left: 1.5rem; position: relative; color: var(--gray-700); }
+    .patterns-list li::before { content: "\1F539"; position: absolute; left: 0; }
+
+    .loading { display: flex; align-items: center; justify-content: center; padding: 3rem; }
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid var(--gray-200);
+      border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .analysis-timestamp { font-size: 0.75rem; color: var(--gray-500); text-align: right; margin-top: 0.5rem; }
+
+    @media (max-width: 768px) {
+      .grid { grid-template-columns: 1fr; }
+      .chart-container { flex-direction: column; }
+      .action-bar { flex-direction: column; }
+      .summary-card-analysis { flex-direction: column; text-align: center; }
+      .insights-grid, .highlights-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Productivity Dashboard <span class="live-badge">LIVE</span></h1>
+      <p class="date" id="dateDisplay">Loading...</p>
+    </header>
+
+    <div id="content">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+
+    <footer>
+      <p>Productivity Dashboard &bull; Powered by Claude AI</p>
+    </footer>
+  </div>
+
+  <script>
+    const API_BASE = '';
+
+    // Utility functions
+    function formatTime(minutes) {
+      if (!minutes || minutes < 1) return '< 1m';
+      if (minutes < 60) return `${Math.round(minutes)}m`;
+      const hours = Math.floor(minutes / 60);
+      const mins = Math.round(minutes % 60);
+      if (mins === 0) return `${hours}h`;
+      return `${hours}h ${mins}m`;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // State
+    let dashboardData = null;
+    let isAnalyzing = false;
+
+    // Fetch dashboard data
+    async function fetchData() {
+      try {
+        const response = await fetch(`${API_BASE}/api/data`);
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Failed to fetch data');
+        }
+        return await response.json();
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        throw err;
+      }
+    }
+
+    // Run AI analysis
+    async function runAnalysis(force = false) {
+      if (isAnalyzing) return;
+      isAnalyzing = true;
+      updateAnalyzeButton();
+
+      try {
+        const response = await fetch(`${API_BASE}/api/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force })
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Failed to run analysis');
+        }
+
+        const result = await response.json();
+        dashboardData.analysis = result.analysis;
+        dashboardData.analysis_generated_at = result.generated_at;
+        renderDashboard();
+      } catch (err) {
+        console.error('Error running analysis:', err);
+        alert('Error running analysis: ' + err.message);
+      } finally {
+        isAnalyzing = false;
+        updateAnalyzeButton();
+      }
+    }
+
+    function updateAnalyzeButton() {
+      const btn = document.getElementById('analyzeBtn');
+      if (btn) {
+        btn.disabled = isAnalyzing;
+        btn.innerHTML = isAnalyzing
+          ? '<span class="spinner" style="width:16px;height:16px;border-width:2px;"></span> Analyzing...'
+          : '<span>&#x2728;</span> Run AI Analysis';
+      }
+    }
+
+    // Generate pie chart SVG
+    function generatePieChart(categories) {
+      const total = categories.reduce((sum, c) => sum + c.minutes, 0);
+      if (total === 0) return '<p class="no-data">No data yet</p>';
+
+      const size = 200;
+      const center = size / 2;
+      const radius = 80;
+      let currentAngle = -90;
+      let paths = '';
+      let legend = '';
+
+      categories.forEach(cat => {
+        if (cat.minutes === 0) return;
+        const percentage = (cat.minutes / total) * 100;
+        const angle = (cat.minutes / total) * 360;
+        const color = cat.color;
+
+        const startAngle = currentAngle;
+        const endAngle = currentAngle + angle;
+        const startRad = (startAngle * Math.PI) / 180;
+        const endRad = (endAngle * Math.PI) / 180;
+        const x1 = center + radius * Math.cos(startRad);
+        const y1 = center + radius * Math.sin(startRad);
+        const x2 = center + radius * Math.cos(endRad);
+        const y2 = center + radius * Math.sin(endRad);
+        const largeArc = angle > 180 ? 1 : 0;
+
+        if (angle < 360) {
+          paths += `<path d="M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z"
+            fill="${color}" stroke="white" stroke-width="2">
+            <title>${cat.label}: ${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</title>
+          </path>`;
+        } else {
+          paths += `<circle cx="${center}" cy="${center}" r="${radius}" fill="${color}" />`;
+        }
+
+        legend += `<div class="legend-item">
+          <span class="legend-color" style="background: ${color}"></span>
+          <span class="legend-label">${escapeHtml(cat.label)}</span>
+          <span class="legend-value">${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</span>
+        </div>`;
+        currentAngle = endAngle;
+      });
+
+      return `<div class="chart-container">
+        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>
+        <div class="legend">${legend}</div>
+      </div>`;
+    }
+
+    // Generate hourly heatmap
+    function generateHourlyHeatmap(hourlyPattern, categoryColors) {
+      const hours = Array.from({ length: 24 }, (_, i) => i);
+      const hourData = {};
+      hourlyPattern.forEach(h => { hourData[h.hour] = h; });
+      const currentHour = new Date().getHours();
+
+      const cells = hours.map(hour => {
+        const data = hourData[hour] || {};
+        const totalMinutes = Object.entries(data)
+          .filter(([key]) => key !== 'hour')
+          .reduce((sum, [, val]) => sum + val, 0);
+        const intensity = Math.min(totalMinutes / 60, 1);
+
+        let dominantCat = 'idle';
+        let maxCatMinutes = 0;
+        Object.entries(data).forEach(([cat, mins]) => {
+          if (cat !== 'hour' && mins > maxCatMinutes) {
+            maxCatMinutes = mins;
+            dominantCat = cat;
+          }
+        });
+
+        const color = categoryColors[dominantCat] || categoryColors.other;
+        const opacity = intensity * 0.8 + 0.2;
+        const isCurrentHour = hour === currentHour;
+
+        return `<div class="hour-cell ${isCurrentHour ? 'current-hour' : ''}"
+          style="background: ${totalMinutes > 0 ? color : '#f3f4f6'}; opacity: ${totalMinutes > 0 ? opacity : 1}">
+          <span class="hour-label">${hour}</span>
+          ${totalMinutes > 0 ? `<span class="hour-value">${Math.round(totalMinutes)}m</span>` : ''}
+        </div>`;
+      }).join('');
+
+      return `<div class="hourly-heatmap">
+        <div class="heatmap-grid">${cells}</div>
+        <div class="heatmap-labels"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span></div>
+      </div>`;
+    }
+
+    // Generate top apps table
+    function generateTopAppsTable(topApps) {
+      if (!topApps || topApps.length === 0) return '<p class="no-data">No app data yet</p>';
+
+      const rows = topApps.slice(0, 10).map((app, i) => `<tr>
+        <td class="rank">${i + 1}</td>
+        <td class="app-name">${escapeHtml(app.app_name) || 'Unknown'}</td>
+        <td class="app-time">${formatTime(app.minutes)}</td>
+        <td><span class="category-badge" style="background: ${app.color}">${escapeHtml(app.label)}</span></td>
+      </tr>`).join('');
+
+      return `<table class="top-apps-table">
+        <thead><tr><th>#</th><th>Application</th><th>Time</th><th>Category</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    // Generate analysis section
+    function generateAnalysisSection(analysis, generatedAt) {
+      if (!analysis) {
+        return `<div class="card" style="text-align: center; padding: 2rem;">
+          <h2>AI Analysis</h2>
+          <p class="no-data">No AI analysis yet. Click "Run AI Analysis" to get personalized productivity insights.</p>
+        </div>`;
+      }
+
+      const scoreClass = analysis.productivity_score?.score >= 7 ? 'score-high' :
+                         analysis.productivity_score?.score >= 4 ? 'score-medium' : 'score-low';
+
+      const recommendations = (analysis.recommendations || []).map((rec, i) => `
+        <div class="recommendation">
+          <div class="rec-number">${i + 1}</div>
+          <div class="rec-content">
+            <h4>${escapeHtml(rec.title)}</h4>
+            <p>${escapeHtml(rec.description)}</p>
+          </div>
+        </div>
+      `).join('');
+
+      const positives = (analysis.highlights?.positive || []).map(h => `<li>${escapeHtml(h)}</li>`).join('');
+      const improvements = (analysis.highlights?.areas_for_improvement || []).map(h => `<li>${escapeHtml(h)}</li>`).join('');
+      const patterns = (analysis.patterns || []).map(p => `<li>${escapeHtml(p)}</li>`).join('');
+      const likelyCauses = (analysis.interruption_patterns?.likely_causes || []).map(c => `<li>${escapeHtml(c)}</li>`).join('');
+
+      const timestamp = generatedAt ? new Date(generatedAt).toLocaleString() : '';
+
+      return `
+        <div class="analysis-section">
+          <div class="summary-card-analysis">
+            <div class="score-circle ${scoreClass}">
+              <span class="score-value">${analysis.productivity_score?.score || '?'}</span>
+              <span class="score-label">/ 10</span>
+            </div>
+            <div class="summary-text">
+              <p class="summary-main">${escapeHtml(analysis.summary || '')}</p>
+              <p class="summary-justification">${escapeHtml(analysis.productivity_score?.justification || '')}</p>
+            </div>
+          </div>
+
+          <div class="insights-grid">
+            <div class="insight-card">
+              <h3>Deep Work</h3>
+              <div class="insight-stat">${formatTime(analysis.deep_work_analysis?.estimated_deep_work_minutes || 0)}</div>
+              <p>${escapeHtml(analysis.deep_work_analysis?.longest_focus_stretch || 'No data')}</p>
+              <p class="insight-note">${escapeHtml(analysis.deep_work_analysis?.quality_assessment || '')}</p>
+            </div>
+
+            <div class="insight-card">
+              <h3>Interruptions</h3>
+              <p>${escapeHtml(analysis.interruption_patterns?.context_switch_assessment || 'No data')}</p>
+              ${likelyCauses ? `<ul class="insight-list">${likelyCauses}</ul>` : ''}
+            </div>
+          </div>
+
+          ${recommendations ? `
+          <div class="card">
+            <h2>Recommendations</h2>
+            <div class="recommendations">${recommendations}</div>
+          </div>
+          ` : ''}
+
+          ${(positives || improvements) ? `
+          <div class="highlights-grid">
+            ${positives ? `
+            <div class="highlight-card highlight-positive">
+              <h3>Positives</h3>
+              <ul>${positives}</ul>
+            </div>
+            ` : ''}
+            ${improvements ? `
+            <div class="highlight-card highlight-improve">
+              <h3>Areas for Improvement</h3>
+              <ul>${improvements}</ul>
+            </div>
+            ` : ''}
+          </div>
+          ` : ''}
+
+          ${patterns ? `
+          <div class="card">
+            <h3>Notable Patterns</h3>
+            <ul class="patterns-list">${patterns}</ul>
+          </div>
+          ` : ''}
+
+          ${timestamp ? `<p class="analysis-timestamp">Analysis generated: ${timestamp}</p>` : ''}
+        </div>
+      `;
+    }
+
+    // Render dashboard
+    function renderDashboard() {
+      const data = dashboardData;
+      const content = document.getElementById('content');
+
+      if (!data || !data.summary || data.summary.total_active_minutes === 0) {
+        content.innerHTML = `<div class="card">
+          <p class="no-data">No activity data recorded yet today. Start tracking to see your dashboard!</p>
+        </div>`;
+        return;
+      }
+
+      const formattedDate = new Date(data.date + 'T00:00:00').toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+      });
+      const timeStr = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      document.getElementById('dateDisplay').textContent = `${formattedDate} \u2022 Last updated: ${timeStr}`;
+
+      content.innerHTML = `
+        <div class="action-bar">
+          <button class="action-btn action-btn-primary" id="analyzeBtn" onclick="runAnalysis(true)">
+            <span>&#x2728;</span> Run AI Analysis
+          </button>
+          <button class="action-btn action-btn-secondary" onclick="refreshDashboard()">
+            <span>&#x21bb;</span> Refresh
+          </button>
+        </div>
+
+        <div class="summary-bar">
+          <div class="stat">
+            <div class="stat-value">${formatTime(data.summary.total_active_minutes)}</div>
+            <div class="stat-label">Active Time</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">${formatTime(data.summary.total_idle_minutes)}</div>
+            <div class="stat-label">Idle Time</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">${data.summary.context_switches}</div>
+            <div class="stat-label">Context Switches</div>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <h2>Time by Category</h2>
+            ${generatePieChart(data.category_breakdown)}
+          </div>
+          <div class="card">
+            <h2>Top Applications</h2>
+            ${generateTopAppsTable(data.top_apps)}
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Activity by Hour</h2>
+          ${generateHourlyHeatmap(data.hourly_pattern, data.category_colors)}
+        </div>
+
+        ${generateAnalysisSection(data.analysis, data.analysis_generated_at)}
+      `;
+
+      updateAnalyzeButton();
+    }
+
+    // Refresh dashboard
+    async function refreshDashboard() {
+      const content = document.getElementById('content');
+      content.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+      try {
+        dashboardData = await fetchData();
+        renderDashboard();
+      } catch (err) {
+        content.innerHTML = `<div class="card"><p class="error-message">Error loading dashboard: ${escapeHtml(err.message)}</p></div>`;
+      }
+    }
+
+    // Initialize
+    refreshDashboard();
+  </script>
+</body>
+</html>
