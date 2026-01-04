@@ -1,10 +1,17 @@
 const { execSync } = require('child_process');
 
+const isMacOS = process.platform === 'darwin';
+
 /**
  * Get active window information on macOS using AppleScript.
  * This avoids native module compatibility issues with Electron.
  */
 async function getActiveWindow() {
+  if (!isMacOS) {
+    console.warn('getActiveWindow: Not running on macOS, returning null');
+    return null;
+  }
+
   try {
     // AppleScript to get frontmost application and window info
     const script = `
@@ -41,11 +48,9 @@ async function getActiveWindow() {
       }
     };
   } catch (error) {
-    // If AppleScript fails (e.g., permission denied, no window), return null
-    if (error.message && error.message.includes('execution error')) {
-      return null;
-    }
-    throw error;
+    // Log the error for debugging but don't crash
+    console.error('getActiveWindow error:', error.message);
+    return null;
   }
 }
 
