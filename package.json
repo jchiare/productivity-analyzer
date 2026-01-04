@@ -13,7 +13,6 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
-    "active-win": "^9.0.0",
     "better-sqlite3": "^12.5.0",
     "dotenv": "^17.2.3",
     "electron": "^39.2.7"
