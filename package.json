@@ -1,0 +1,21 @@
+{
+  "name": "productivity-tracker",
+  "version": "1.0.0",
+  "description": "A macOS menu bar app that tracks active window information and generates AI-powered productivity insights",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "analyze": "node scripts/analyze.js",
+    "report": "node scripts/generate-report.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "active-win": "^8.1.0",
+    "better-sqlite3": "^11.6.0",
+    "dotenv": "^16.4.7",
+    "electron": "^33.2.1"
+  },
+  "devDependencies": {}
+}
