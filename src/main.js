@@ -7,10 +7,8 @@ const { getCategoryLabel, getCategoryColor } = require('./categorize');
 let tray = null;
 let statsUpdateInterval = null;
 
-// Hide dock icon (menu bar app only)
-if (app.dock) {
-  app.dock.hide();
-}
+// Show in dock so user knows app is running
+// (remove the app.dock.hide() call)
 
 /**
  * Format minutes into a human-readable string
@@ -168,30 +166,43 @@ async function updateTray() {
  * Initialize the app
  */
 async function init() {
+  console.log('========================================');
+  console.log('Productivity Tracker - Starting...');
+  console.log('========================================');
+
   // Initialize the database
+  const { DB_PATH } = require('./database');
+  console.log(`Database path: ${DB_PATH}`);
   initDatabase();
+  console.log('✓ Database initialized');
 
   // Clean up old data (keep last 30 days)
   const deleted = cleanupOldData(30);
   if (deleted > 0) {
-    console.log(`Cleaned up ${deleted} old records`);
+    console.log(`✓ Cleaned up ${deleted} old records`);
   }
 
   // Create the tray icon
   const icon = createTrayIcon();
   tray = new Tray(icon);
   tray.setToolTip('Productivity Tracker');
+  console.log('✓ Menu bar tray icon created');
 
   // Build initial menu
   await updateTray();
 
   // Start tracking by default
   startCapture();
+  console.log('✓ Activity tracking started (captures every 5 seconds)');
 
   // Update stats in the menu every 30 seconds
   statsUpdateInterval = setInterval(updateTray, 30000);
 
-  console.log('Productivity Tracker started');
+  console.log('========================================');
+  console.log('Productivity Tracker is now running!');
+  console.log('Look for the clock icon in your menu bar.');
+  console.log('Database: ' + DB_PATH);
+  console.log('========================================');
 }
 
 // App lifecycle
