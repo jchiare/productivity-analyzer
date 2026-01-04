@@ -4,12 +4,11 @@
   "description": "A macOS menu bar app that tracks active window information and generates AI-powered productivity insights",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron .",
-    "dashboard": "electron scripts/quick-dashboard.js && open reports/dashboard.html",
+    "start": "electron-rebuild && electron .",
+    "dashboard": "node scripts/quick-dashboard.js && open reports/dashboard.html",
     "analyze": "node scripts/analyze.js",
     "report": "node scripts/generate-report.js",
-    "db": "node scripts/view-db.js",
-    "postinstall": "electron-rebuild"
+    "db": "node scripts/view-db.js"
   },
   "author": "",
   "license": "MIT",
@@ -19,5 +18,7 @@
     "dotenv": "^17.2.3",
     "electron": "^39.2.7"
   },
-  "devDependencies": {"@electron/rebuild": "^3.7.1"}
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1"
+  }
 }
