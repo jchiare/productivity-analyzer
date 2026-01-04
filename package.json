@@ -5,9 +5,8 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron-rebuild && electron .",
-    "dashboard": "node scripts/quick-dashboard.js && open reports/dashboard.html",
-    "analyze": "node scripts/analyze.js",
-    "report": "node scripts/generate-report.js",
+    "server": "node scripts/server.js",
+    "dashboard": "node scripts/server.js & sleep 1 && open http://localhost:3456",
     "db": "node scripts/view-db.js"
   },
   "author": "",
@@ -15,8 +14,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "better-sqlite3": "^12.5.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "electron": "^39.2.7"
+    "electron": "^39.2.7",
+    "express": "^5.2.1"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.2"

@@ -36,6 +36,7 @@ const APP_CATEGORIES = {
   'hyper': 'coding',
   'kitty': 'coding',
   'alacritty': 'coding',
+  'ghostty': 'coding',
 
   // Communication
   'slack': 'communication',
@@ -193,7 +194,6 @@ const BROWSER_PATTERNS = {
     /console\./i,
     /dashboard/i,
     /admin/i,
-    /anthropic\.com/i,
     /openai\.com/i,
   ],
   social_media: [
@@ -261,6 +261,10 @@ const BROWSER_PATTERNS = {
     /crates\.io/i,
     /pkg\.go\.dev/i,
     /rubygems\.org/i,
+    /claude\.ai/i,
+    /claude code/i,
+    /Claude Code \|/i,
+    /anthropic.*claude/i,
   ],
 };
 
