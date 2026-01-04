@@ -111,7 +111,23 @@ async function buildMenu() {
       }
     },
     {
-      label: 'Run Analysis',
+      label: "View Today's Dashboard",
+      click: async () => {
+        try {
+          const { execSync } = require('child_process');
+          const dashboardScript = path.join(__dirname, '..', 'scripts', 'quick-dashboard.js');
+          const outputPath = execSync(`node "${dashboardScript}"`, {
+            cwd: path.join(__dirname, '..'),
+            encoding: 'utf8'
+          }).trim();
+          shell.openPath(outputPath);
+        } catch (error) {
+          console.error('Failed to open dashboard:', error);
+        }
+      }
+    },
+    {
+      label: 'Run AI Analysis',
       click: async () => {
         try {
           // Run the analyze script
