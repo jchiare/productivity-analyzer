@@ -1,16 +1,51 @@
-const { app, Tray, Menu, nativeImage, shell } = require('electron');
+// Catch any early crashes
+process.on('uncaughtException', (error) => {
+  console.error('UNCAUGHT EXCEPTION:', error);
+});
+
+console.log('Loading Electron modules...');
+const { app, Tray, Menu, nativeImage, shell, dialog } = require('electron');
 const path = require('path');
-const { initDatabase, getCategoryStats, getDaySummary, cleanupOldData, closeDatabase } = require('./database');
-const { startCapture, stopCapture, isCaptureRunning } = require('./capture');
-const { getCategoryLabel, getCategoryColor } = require('./categorize');
+
+console.log('Loading app modules...');
+
+let database, capture, categorize;
+let loadError = null;
+
+try {
+  database = require('./database');
+  console.log('✓ Database module loaded');
+} catch (err) {
+  console.error('✗ Failed to load database module:', err.message);
+  loadError = err;
+}
+
+try {
+  capture = require('./capture');
+  console.log('✓ Capture module loaded');
+} catch (err) {
+  console.error('✗ Failed to load capture module:', err.message);
+  loadError = err;
+}
+
+try {
+  categorize = require('./categorize');
+  console.log('✓ Categorize module loaded');
+} catch (err) {
+  console.error('✗ Failed to load categorize module:', err.message);
+  loadError = err;
+}
+
+// Destructure after checking
+const { initDatabase, getCategoryStats, getDaySummary, cleanupOldData, closeDatabase } = database || {};
+const { startCapture, stopCapture, isCaptureRunning } = capture || {};
+const { getCategoryLabel, getCategoryColor } = categorize || {};
 
 let tray = null;
 let statsUpdateInterval = null;
 
-// Hide dock icon (menu bar app only)
-if (app.dock) {
-  app.dock.hide();
-}
+// Show in dock so user knows app is running
+// (remove the app.dock.hide() call)
 
 /**
  * Format minutes into a human-readable string
@@ -168,53 +203,92 @@ async function updateTray() {
  * Initialize the app
  */
 async function init() {
+  console.log('========================================');
+  console.log('Productivity Tracker - Starting...');
+  console.log('========================================');
+
+  // Show error dialog if modules failed to load
+  if (loadError) {
+    dialog.showErrorBox(
+      'Failed to start',
+      `A module failed to load: ${loadError.message}\n\nTry running:\nrm -rf node_modules\nnpm install`
+    );
+    app.quit();
+    return;
+  }
+
   // Initialize the database
+  const { DB_PATH } = require('./database');
+  console.log(`Database path: ${DB_PATH}`);
   initDatabase();
+  console.log('✓ Database initialized');
 
   // Clean up old data (keep last 30 days)
   const deleted = cleanupOldData(30);
   if (deleted > 0) {
-    console.log(`Cleaned up ${deleted} old records`);
+    console.log(`✓ Cleaned up ${deleted} old records`);
   }
 
   // Create the tray icon
   const icon = createTrayIcon();
   tray = new Tray(icon);
   tray.setToolTip('Productivity Tracker');
+  console.log('✓ Menu bar tray icon created');
 
   // Build initial menu
   await updateTray();
 
   // Start tracking by default
   startCapture();
+  console.log('✓ Activity tracking started (captures every 5 seconds)');
 
   // Update stats in the menu every 30 seconds
   statsUpdateInterval = setInterval(updateTray, 30000);
 
-  console.log('Productivity Tracker started');
+  console.log('========================================');
+  console.log('Productivity Tracker is now running!');
+  console.log('Look for the clock icon in your menu bar.');
+  console.log('Database: ' + DB_PATH);
+  console.log('========================================');
 }
 
-// App lifecycle
-app.whenReady().then(init);
-
-app.on('window-all-closed', (e) => {
-  // Prevent default behavior of quitting
-  e.preventDefault();
-});
-
-app.on('before-quit', () => {
-  // Stop capture and clean up
-  stopCapture();
-
-  if (statsUpdateInterval) {
-    clearInterval(statsUpdateInterval);
-  }
-
-  closeDatabase();
-});
-
-// Handle second instance
+// Handle second instance - must be done early
 const gotTheLock = app.requestSingleInstanceLock();
+console.log('Single instance lock:', gotTheLock ? 'acquired' : 'FAILED (another instance running?)');
+
 if (!gotTheLock) {
+  console.log('Another instance is already running. Exiting.');
   app.quit();
+} else {
+  // App lifecycle
+  console.log('Waiting for app to be ready...');
+
+  app.whenReady().then(() => {
+    console.log('App is ready!');
+    init();
+  }).catch(err => {
+    console.error('Error in init:', err);
+  });
+
+  app.on('window-all-closed', (e) => {
+    // Prevent quitting - we're a tray app with no windows
+    e.preventDefault();
+  });
+
+  // Keep the app running even with no windows
+  app.on('activate', () => {
+    console.log('App activated');
+  });
+
+  app.on('before-quit', () => {
+    console.log('App quitting...');
+    // Stop capture and clean up
+    if (stopCapture) stopCapture();
+
+    if (statsUpdateInterval) {
+      clearInterval(statsUpdateInterval);
+    }
+
+    if (closeDatabase) closeDatabase();
+  });
 }
