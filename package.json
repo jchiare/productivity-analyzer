@@ -5,7 +5,8 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron-rebuild && electron .",
-    "dashboard": "node scripts/server.js",
+    "server": "node scripts/server.js",
+    "dashboard": "node scripts/server.js & sleep 1 && open http://localhost:3456",
     "db": "node scripts/view-db.js"
   },
   "author": "",
