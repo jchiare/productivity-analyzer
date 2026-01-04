@@ -1,6 +1,7 @@
 const { powerMonitor } = require('electron');
 const { logActivity } = require('./database');
 const { categorize, extractUrlFromTitle, isBrowser } = require('./categorize');
+const { getActiveWindow } = require('./active-window-macos');
 
 // Configuration
 const CONFIG = {
@@ -10,25 +11,12 @@ const CONFIG = {
 
 let captureInterval = null;
 let isCapturing = false;
-let activeWin = null;
-
-/**
- * Dynamically import active-win (ESM module)
- */
-async function getActiveWin() {
-  if (!activeWin) {
-    // active-win is an ESM module, need to use dynamic import
-    activeWin = (await import('active-win')).default;
-  }
-  return activeWin;
-}
 
 /**
  * Capture the current active window and log it
  */
 async function captureActivity() {
   try {
-    const getActiveWindow = await getActiveWin();
     const now = new Date();
 
     // Check if system is idle
@@ -50,7 +38,7 @@ async function captureActivity() {
       return { isIdle: true, idleTime };
     }
 
-    // Get active window info
+    // Get active window info using native macOS AppleScript
     const windowInfo = await getActiveWindow();
 
     if (!windowInfo) {
