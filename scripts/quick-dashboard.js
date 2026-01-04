@@ -19,7 +19,7 @@ const APP_SUPPORT_DIR = path.join(os.homedir(), 'Library', 'Application Support'
 const DB_PATH = path.join(APP_SUPPORT_DIR, 'productivity.db');
 const REPORTS_DIR = path.join(__dirname, '..', 'reports');
 
-// Category colors and labels (duplicated to avoid requiring electron modules)
+// Category colors and labels
 const CATEGORY_COLORS = {
   coding: '#10B981',
   communication: '#3B82F6',
@@ -71,6 +71,11 @@ function getTodayDate() {
   return new Date().toISOString().split('T')[0];
 }
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function getDataForDate(date) {
   if (!fs.existsSync(DB_PATH)) {
     return null;
@@ -112,6 +117,34 @@ function getDataForDate(date) {
     `);
     const categoryBreakdown = categoryStmt.all(date);
 
+    // Get detailed breakdown per category (apps and window titles)
+    const detailStmt = db.prepare(`
+      SELECT
+        category,
+        app_name,
+        window_title,
+        COUNT(*) as record_count,
+        ROUND(COUNT(*) * 5.0 / 60, 2) as minutes
+      FROM activity_log
+      WHERE date = ? AND is_idle = 0
+      GROUP BY category, app_name, window_title
+      ORDER BY category, record_count DESC
+    `);
+    const detailRows = detailStmt.all(date);
+
+    // Organize details by category
+    const categoryDetails = {};
+    for (const row of detailRows) {
+      if (!categoryDetails[row.category]) {
+        categoryDetails[row.category] = [];
+      }
+      categoryDetails[row.category].push({
+        app_name: row.app_name,
+        window_title: row.window_title,
+        minutes: row.minutes
+      });
+    }
+
     // Get hourly breakdown
     const hourlyStmt = db.prepare(`
       SELECT hour, category, COUNT(*) as record_count, ROUND(COUNT(*) * 5.0 / 60, 2) as minutes
@@ -143,6 +176,7 @@ function getDataForDate(date) {
         context_switches: switches
       },
       category_breakdown: categoryBreakdown,
+      category_details: categoryDetails,
       hourly_pattern: hourlyPattern,
       top_apps: topApps
     };
@@ -152,7 +186,7 @@ function getDataForDate(date) {
   }
 }
 
-function generatePieChart(categoryBreakdown) {
+function generatePieChart(categoryBreakdown, categoryDetails) {
   const total = categoryBreakdown.reduce((sum, c) => sum + c.minutes, 0);
   if (total === 0) return '<p class="no-data">No data yet</p>';
 
@@ -180,17 +214,52 @@ function generatePieChart(categoryBreakdown) {
 
     if (angle < 360) {
       paths.push(`<path d="M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z"
-        fill="${color}" stroke="white" stroke-width="2">
+        fill="${color}" stroke="white" stroke-width="2" class="pie-slice" data-category="${cat.category}">
         <title>${getCategoryLabel(cat.category)}: ${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</title>
       </path>`);
     } else {
-      paths.push(`<circle cx="${center}" cy="${center}" r="${radius}" fill="${color}" />`);
+      paths.push(`<circle cx="${center}" cy="${center}" r="${radius}" fill="${color}" class="pie-slice" data-category="${cat.category}" />`);
     }
 
-    legend.push(`<div class="legend-item">
+    // Generate detail items for this category
+    const details = categoryDetails[cat.category] || [];
+    // Group by app first, then show top window titles
+    const appGroups = {};
+    for (const d of details) {
+      const app = d.app_name || 'Unknown';
+      if (!appGroups[app]) appGroups[app] = { minutes: 0, titles: [] };
+      appGroups[app].minutes += d.minutes;
+      if (d.window_title && appGroups[app].titles.length < 3) {
+        appGroups[app].titles.push({ title: d.window_title, minutes: d.minutes });
+      }
+    }
+
+    const sortedApps = Object.entries(appGroups)
+      .sort((a, b) => b[1].minutes - a[1].minutes)
+      .slice(0, 8);
+
+    const detailHtml = sortedApps.map(([appName, data]) => {
+      const titlesHtml = data.titles
+        .slice(0, 2)
+        .map(t => `<div class="detail-title">${escapeHtml(t.title.substring(0, 60))}${t.title.length > 60 ? '...' : ''}</div>`)
+        .join('');
+      return `<div class="detail-app">
+        <div class="detail-app-header">
+          <span class="detail-app-name">${escapeHtml(appName)}</span>
+          <span class="detail-app-time">${formatTime(data.minutes)}</span>
+        </div>
+        ${titlesHtml}
+      </div>`;
+    }).join('');
+
+    legend.push(`<div class="legend-item" data-category="${cat.category}">
       <span class="legend-color" style="background: ${color}"></span>
       <span class="legend-label">${getCategoryLabel(cat.category)}</span>
       <span class="legend-value">${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</span>
+      <span class="legend-arrow">▶</span>
+    </div>
+    <div class="category-details" id="details-${cat.category}">
+      ${detailHtml || '<div class="no-details">No detailed data</div>'}
     </div>`);
     currentAngle = endAngle;
   });
@@ -245,7 +314,7 @@ function generateTopAppsTable(topApps) {
 
   const rows = topApps.slice(0, 10).map((app, index) => `<tr>
     <td class="rank">${index + 1}</td>
-    <td class="app-name">${app.app_name || 'Unknown'}</td>
+    <td class="app-name">${escapeHtml(app.app_name) || 'Unknown'}</td>
     <td class="app-time">${formatTime(app.minutes)}</td>
     <td><span class="category-badge" style="background: ${getCategoryColor(app.category)}">${getCategoryLabel(app.category)}</span></td>
   </tr>`).join('');
@@ -298,6 +367,24 @@ function generateHTML(data, date) {
       font-weight: 600; margin-left: 0.5rem; animation: pulse 2s infinite;
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+    .action-bar {
+      display: flex; justify-content: center; gap: 1rem; margin-bottom: 1.5rem;
+    }
+    .action-btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: 600;
+      font-size: 0.875rem; cursor: pointer; border: none; transition: all 0.2s;
+    }
+    .action-btn-primary {
+      background: linear-gradient(135deg, #8B5CF6, #6366F1); color: white;
+    }
+    .action-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4); }
+    .action-btn-secondary {
+      background: white; color: var(--gray-700); border: 1px solid var(--gray-200);
+    }
+    .action-btn-secondary:hover { background: var(--gray-50); }
+
     .summary-bar {
       background: white; border-radius: 1rem; padding: 1.5rem;
       margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -309,12 +396,42 @@ function generateHTML(data, date) {
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
     .card { background: white; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: var(--gray-900); }
-    .chart-container { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+    .chart-container { display: flex; align-items: flex-start; gap: 1.5rem; flex-wrap: wrap; }
     .legend { flex: 1; min-width: 200px; }
-    .legend-item { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; font-size: 0.8rem; }
+    .legend-item {
+      display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;
+      font-size: 0.8rem; padding: 0.4rem 0.5rem; border-radius: 0.375rem;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .legend-item:hover { background: var(--gray-100); }
+    .legend-item.expanded { background: var(--gray-100); }
+    .legend-item.expanded .legend-arrow { transform: rotate(90deg); }
     .legend-color { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
     .legend-label { flex: 1; color: var(--gray-700); }
     .legend-value { color: var(--gray-500); font-variant-numeric: tabular-nums; }
+    .legend-arrow {
+      font-size: 0.6rem; color: var(--gray-400); transition: transform 0.2s;
+      margin-left: 0.25rem;
+    }
+
+    .category-details {
+      display: none; padding: 0.5rem 0 0.5rem 1.5rem; margin-bottom: 0.5rem;
+      border-left: 2px solid var(--gray-200); margin-left: 0.75rem;
+    }
+    .category-details.visible { display: block; }
+    .detail-app { margin-bottom: 0.5rem; }
+    .detail-app-header { display: flex; justify-content: space-between; font-size: 0.75rem; }
+    .detail-app-name { font-weight: 500; color: var(--gray-700); }
+    .detail-app-time { color: var(--gray-500); font-variant-numeric: tabular-nums; }
+    .detail-title {
+      font-size: 0.7rem; color: var(--gray-500); padding-left: 0.5rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
+    }
+    .no-details { font-size: 0.75rem; color: var(--gray-400); font-style: italic; }
+
+    .pie-slice { cursor: pointer; transition: opacity 0.2s; }
+    .pie-slice:hover { opacity: 0.8; }
+
     .hourly-heatmap { margin-top: 0.5rem; }
     .heatmap-grid { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
     .hour-cell {
@@ -334,9 +451,38 @@ function generateHTML(data, date) {
     .category-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.65rem; font-weight: 500; color: white; }
     .no-data { color: var(--gray-500); font-style: italic; text-align: center; padding: 2rem; }
     footer { text-align: center; margin-top: 2rem; color: var(--gray-500); font-size: 0.8rem; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal {
+      background: white; border-radius: 1rem; padding: 2rem; max-width: 500px; width: 90%;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+    }
+    .modal h3 { font-size: 1.25rem; margin-bottom: 1rem; }
+    .modal p { color: var(--gray-700); margin-bottom: 1rem; }
+    .modal code {
+      display: block; background: var(--gray-900); color: #10B981; padding: 1rem;
+      border-radius: 0.5rem; font-size: 0.875rem; margin: 1rem 0; overflow-x: auto;
+    }
+    .modal-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+    .modal-btn {
+      flex: 1; padding: 0.75rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer;
+      border: none; font-size: 0.875rem;
+    }
+    .modal-btn-copy { background: var(--primary); color: white; }
+    .modal-btn-copy:hover { background: #2563EB; }
+    .modal-btn-close { background: var(--gray-100); color: var(--gray-700); }
+    .modal-btn-close:hover { background: var(--gray-200); }
+    .copy-success { color: var(--success); font-size: 0.875rem; text-align: center; margin-top: 0.5rem; display: none; }
+
     @media (max-width: 768px) {
       .grid { grid-template-columns: 1fr; }
       .chart-container { flex-direction: column; }
+      .action-bar { flex-direction: column; }
     }
   </style>
 </head>
@@ -348,6 +494,15 @@ function generateHTML(data, date) {
     </header>
 
     ${hasData ? `
+    <div class="action-bar">
+      <button class="action-btn action-btn-primary" onclick="showAnalysisModal()">
+        <span>✨</span> Run AI Analysis
+      </button>
+      <button class="action-btn action-btn-secondary" onclick="location.reload()">
+        <span>↻</span> Refresh
+      </button>
+    </div>
+
     <div class="summary-bar">
       <div class="stat">
         <div class="stat-value">${formatTime(data.summary.total_active_minutes)}</div>
@@ -365,8 +520,8 @@ function generateHTML(data, date) {
 
     <div class="grid">
       <div class="card">
-        <h2>Time by Category</h2>
-        ${generatePieChart(data.category_breakdown)}
+        <h2>Time by Category <span style="font-size: 0.75rem; color: var(--gray-500); font-weight: normal;">(click to expand)</span></h2>
+        ${generatePieChart(data.category_breakdown, data.category_details)}
       </div>
       <div class="card">
         <h2>Top Applications</h2>
@@ -385,10 +540,84 @@ function generateHTML(data, date) {
     `}
 
     <footer>
-      <p>Quick Dashboard &bull; No AI analysis &bull; Refresh page to update</p>
-      <p style="margin-top: 0.5rem;">For AI-powered insights, run: <code>npm run analyze && npm run report</code></p>
+      <p>Quick Dashboard &bull; Click categories to see details &bull; Refresh page to update</p>
     </footer>
   </div>
+
+  <!-- AI Analysis Modal -->
+  <div class="modal-overlay" id="analysisModal">
+    <div class="modal">
+      <h3>✨ Run AI Analysis</h3>
+      <p>Get personalized productivity insights powered by Claude AI. Run this command in your terminal:</p>
+      <code>cd ~/Code/productivity-analyzer && npm run analyze && npm run report</code>
+      <p style="font-size: 0.875rem;">This will analyze your day and generate a detailed report with recommendations.</p>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-copy" onclick="copyCommand()">Copy Command</button>
+        <button class="modal-btn modal-btn-close" onclick="hideAnalysisModal()">Close</button>
+      </div>
+      <div class="copy-success" id="copySuccess">✓ Copied to clipboard!</div>
+    </div>
+  </div>
+
+  <script>
+    // Category drill-down
+    document.querySelectorAll('.legend-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const category = item.dataset.category;
+        const details = document.getElementById('details-' + category);
+        const isExpanded = item.classList.contains('expanded');
+
+        // Close all others
+        document.querySelectorAll('.legend-item').forEach(i => i.classList.remove('expanded'));
+        document.querySelectorAll('.category-details').forEach(d => d.classList.remove('visible'));
+
+        // Toggle current
+        if (!isExpanded && details) {
+          item.classList.add('expanded');
+          details.classList.add('visible');
+        }
+      });
+    });
+
+    // Pie chart click
+    document.querySelectorAll('.pie-slice').forEach(slice => {
+      slice.addEventListener('click', () => {
+        const category = slice.dataset.category;
+        const legendItem = document.querySelector('.legend-item[data-category="' + category + '"]');
+        if (legendItem) legendItem.click();
+      });
+    });
+
+    // Modal functions
+    function showAnalysisModal() {
+      document.getElementById('analysisModal').classList.add('visible');
+    }
+
+    function hideAnalysisModal() {
+      document.getElementById('analysisModal').classList.remove('visible');
+      document.getElementById('copySuccess').style.display = 'none';
+    }
+
+    function copyCommand() {
+      const cmd = 'cd ~/Code/productivity-analyzer && npm run analyze && npm run report';
+      navigator.clipboard.writeText(cmd).then(() => {
+        document.getElementById('copySuccess').style.display = 'block';
+        setTimeout(() => {
+          document.getElementById('copySuccess').style.display = 'none';
+        }, 2000);
+      });
+    }
+
+    // Close modal on overlay click
+    document.getElementById('analysisModal').addEventListener('click', (e) => {
+      if (e.target.id === 'analysisModal') hideAnalysisModal();
+    });
+
+    // Close modal on Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideAnalysisModal();
+    });
+  </script>
 </body>
 </html>`;
 }
