@@ -36,6 +36,7 @@ const APP_CATEGORIES = {
   'hyper': 'coding',
   'kitty': 'coding',
   'alacritty': 'coding',
+  'ghostty': 'coding',
 
   // Communication
   'slack': 'communication',
@@ -262,6 +263,7 @@ const BROWSER_PATTERNS = {
     /rubygems\.org/i,
     /claude\.ai/i,
     /claude code/i,
+    /Claude Code \|/i,
     /anthropic.*claude/i,
   ],
 };
