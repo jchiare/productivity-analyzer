@@ -3,6 +3,10 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const Anthropic = require('@anthropic-ai/sdk');
+
+// Load environment variables from .env file
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 // Handle running via Electron CLI
 let app = null;
@@ -74,6 +78,125 @@ function getTodayDate() {
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Build prompt for Claude AI analysis
+ */
+function buildPrompt(data) {
+  return `You are a productivity coach analyzing a software engineer's workday.
+
+Here is their activity data for ${data.date}:
+
+${JSON.stringify(data, null, 2)}
+
+Please provide a thorough analysis in the following JSON format:
+
+{
+  "summary": "A 2-3 sentence overview of how the day was spent",
+  "productivity_score": {
+    "score": <1-10>,
+    "justification": "Brief explanation of the score"
+  },
+  "deep_work_analysis": {
+    "estimated_deep_work_minutes": <number>,
+    "longest_focus_stretch": "Description of the longest uninterrupted focus period",
+    "quality_assessment": "Assessment of focus work quality"
+  },
+  "interruption_patterns": {
+    "context_switch_assessment": "Analysis of context switching frequency",
+    "peak_interruption_times": ["List of hours when interruptions peaked"],
+    "likely_causes": ["Potential causes of interruptions"]
+  },
+  "time_sinks": [
+    {
+      "category": "Category name",
+      "concern": "Why this might be a time sink",
+      "minutes_spent": <number>
+    }
+  ],
+  "recommendations": [
+    {
+      "title": "Short title",
+      "description": "Specific, actionable suggestion"
+    }
+  ],
+  "patterns": [
+    "Notable pattern observations compared to typical developer workdays"
+  ],
+  "highlights": {
+    "positive": ["Good things about the day"],
+    "areas_for_improvement": ["Areas that could be improved"]
+  }
+}
+
+Be direct and specific. Reference actual apps, times, and data from the input.
+Respond ONLY with the JSON object, no additional text.`;
+}
+
+/**
+ * Run AI analysis using Claude
+ */
+async function runAnalysis(data, date) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!apiKey) {
+    return { error: 'ANTHROPIC_API_KEY not set in .env file' };
+  }
+
+  try {
+    const client = new Anthropic();
+    const prompt = buildPrompt({ ...data, date });
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }]
+    });
+
+    const textContent = response.content.find(block => block.type === 'text');
+    if (!textContent) {
+      return { error: 'No response from Claude' };
+    }
+
+    let jsonStr = textContent.text.trim();
+    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1];
+    }
+
+    const analysis = JSON.parse(jsonStr);
+
+    // Save the analysis
+    const outputPath = path.join(REPORTS_DIR, `${date}-analysis.json`);
+    const fullReport = {
+      generated_at: new Date().toISOString(),
+      date,
+      raw_data: data,
+      analysis
+    };
+    fs.writeFileSync(outputPath, JSON.stringify(fullReport, null, 2));
+
+    return analysis;
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+/**
+ * Load existing analysis for a date
+ */
+function loadExistingAnalysis(date) {
+  const analysisPath = path.join(REPORTS_DIR, `${date}-analysis.json`);
+  if (fs.existsSync(analysisPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(analysisPath, 'utf8'));
+      return data.analysis;
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
 }
 
 function getDataForDate(date) {
@@ -325,7 +448,102 @@ function generateTopAppsTable(topApps) {
   </table>`;
 }
 
-function generateHTML(data, date) {
+function generateAnalysisSection(analysis) {
+  if (!analysis) {
+    return `<div class="card analysis-placeholder">
+      <h2>AI Analysis</h2>
+      <p class="no-data">No AI analysis yet. Click "Run AI Analysis" to get personalized productivity insights.</p>
+    </div>`;
+  }
+
+  if (analysis.error) {
+    return `<div class="card analysis-error">
+      <h2>AI Analysis</h2>
+      <p class="error-message">Error: ${escapeHtml(analysis.error)}</p>
+    </div>`;
+  }
+
+  const scoreClass = analysis.productivity_score?.score >= 7 ? 'score-high' :
+                     analysis.productivity_score?.score >= 4 ? 'score-medium' : 'score-low';
+
+  const recommendations = (analysis.recommendations || []).map((rec, i) => `
+    <div class="recommendation">
+      <div class="rec-number">${i + 1}</div>
+      <div class="rec-content">
+        <h4>${escapeHtml(rec.title)}</h4>
+        <p>${escapeHtml(rec.description)}</p>
+      </div>
+    </div>
+  `).join('');
+
+  const positives = (analysis.highlights?.positive || []).map(h => `<li>${escapeHtml(h)}</li>`).join('');
+  const improvements = (analysis.highlights?.areas_for_improvement || []).map(h => `<li>${escapeHtml(h)}</li>`).join('');
+  const patterns = (analysis.patterns || []).map(p => `<li>${escapeHtml(p)}</li>`).join('');
+  const likelyCauses = (analysis.interruption_patterns?.likely_causes || []).map(c => `<li>${escapeHtml(c)}</li>`).join('');
+
+  return `
+    <div class="analysis-section">
+      <div class="summary-card">
+        <div class="score-circle ${scoreClass}">
+          <span class="score-value">${analysis.productivity_score?.score || '?'}</span>
+          <span class="score-label">/ 10</span>
+        </div>
+        <div class="summary-text">
+          <p class="summary-main">${escapeHtml(analysis.summary || '')}</p>
+          <p class="summary-justification">${escapeHtml(analysis.productivity_score?.justification || '')}</p>
+        </div>
+      </div>
+
+      <div class="insights-grid">
+        <div class="insight-card">
+          <h3>🎯 Deep Work</h3>
+          <div class="insight-stat">${formatTime(analysis.deep_work_analysis?.estimated_deep_work_minutes || 0)}</div>
+          <p>${escapeHtml(analysis.deep_work_analysis?.longest_focus_stretch || 'No data')}</p>
+          <p class="insight-note">${escapeHtml(analysis.deep_work_analysis?.quality_assessment || '')}</p>
+        </div>
+
+        <div class="insight-card">
+          <h3>⚡ Interruptions</h3>
+          <p>${escapeHtml(analysis.interruption_patterns?.context_switch_assessment || 'No data')}</p>
+          ${likelyCauses ? `<ul class="insight-list">${likelyCauses}</ul>` : ''}
+        </div>
+      </div>
+
+      ${recommendations ? `
+      <div class="card">
+        <h2>💡 Recommendations</h2>
+        <div class="recommendations">${recommendations}</div>
+      </div>
+      ` : ''}
+
+      ${(positives || improvements) ? `
+      <div class="highlights-grid">
+        ${positives ? `
+        <div class="highlight-card highlight-positive">
+          <h3>✅ Positives</h3>
+          <ul>${positives}</ul>
+        </div>
+        ` : ''}
+        ${improvements ? `
+        <div class="highlight-card highlight-improve">
+          <h3>🔧 Areas for Improvement</h3>
+          <ul>${improvements}</ul>
+        </div>
+        ` : ''}
+      </div>
+      ` : ''}
+
+      ${patterns ? `
+      <div class="card">
+        <h3>🔍 Notable Patterns</h3>
+        <ul class="patterns-list">${patterns}</ul>
+      </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function generateHTML(data, date, analysis) {
   const now = new Date();
   const formattedDate = new Date(date + 'T00:00:00').toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
@@ -450,39 +668,90 @@ function generateHTML(data, date) {
     .app-time { font-variant-numeric: tabular-nums; color: var(--gray-700); }
     .category-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.65rem; font-weight: 500; color: white; }
     .no-data { color: var(--gray-500); font-style: italic; text-align: center; padding: 2rem; }
+    .error-message { color: #EF4444; padding: 1rem; background: #FEF2F2; border-radius: 0.5rem; }
     footer { text-align: center; margin-top: 2rem; color: var(--gray-500); font-size: 0.8rem; }
 
-    /* Modal */
-    .modal-overlay {
+    /* Analysis Section */
+    .analysis-section { margin-top: 1.5rem; }
+    .summary-card {
+      background: white; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 1.5rem;
+    }
+    .score-circle {
+      width: 100px; height: 100px; border-radius: 50%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0;
+    }
+    .score-value { font-size: 2rem; line-height: 1; }
+    .score-label { font-size: 0.75rem; opacity: 0.8; }
+    .score-high { background: linear-gradient(135deg, #10B981, #34D399); color: white; }
+    .score-medium { background: linear-gradient(135deg, #F59E0B, #FBBF24); color: white; }
+    .score-low { background: linear-gradient(135deg, #EF4444, #F87171); color: white; }
+    .summary-text { flex: 1; }
+    .summary-main { font-size: 1rem; color: var(--gray-700); margin-bottom: 0.5rem; }
+    .summary-justification { font-size: 0.875rem; color: var(--gray-500); font-style: italic; }
+
+    .insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .insight-card {
+      background: white; border-radius: 1rem; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .insight-card h3 { font-size: 1rem; margin-bottom: 0.75rem; color: var(--gray-900); }
+    .insight-stat { font-size: 1.75rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem; }
+    .insight-card p { font-size: 0.875rem; color: var(--gray-600); margin-bottom: 0.25rem; }
+    .insight-note { font-style: italic; color: var(--gray-500); }
+    .insight-list { list-style: none; margin-top: 0.5rem; padding-left: 0; }
+    .insight-list li { padding: 0.25rem 0; padding-left: 1rem; position: relative; font-size: 0.875rem; color: var(--gray-600); }
+    .insight-list li::before { content: "•"; position: absolute; left: 0; color: var(--primary); }
+
+    .recommendations { margin-top: 0.5rem; }
+    .recommendation {
+      display: flex; gap: 1rem; padding: 1rem; background: var(--gray-50);
+      border-radius: 0.5rem; margin-bottom: 0.75rem;
+    }
+    .rec-number {
+      width: 28px; height: 28px; background: var(--primary); color: white;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 0.875rem; flex-shrink: 0;
+    }
+    .rec-content h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .rec-content p { color: var(--gray-600); font-size: 0.85rem; }
+
+    .highlights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .highlight-card {
+      background: white; border-radius: 1rem; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .highlight-card h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+    .highlight-card ul { list-style: none; padding-left: 0; }
+    .highlight-card li { padding: 0.35rem 0; padding-left: 1rem; position: relative; font-size: 0.875rem; color: var(--gray-700); }
+    .highlight-positive { border-left: 4px solid var(--success); }
+    .highlight-positive li::before { content: "✓"; position: absolute; left: 0; color: var(--success); }
+    .highlight-improve { border-left: 4px solid var(--warning); }
+    .highlight-improve li::before { content: "→"; position: absolute; left: 0; color: var(--warning); }
+
+    .patterns-list { list-style: none; padding-left: 0; }
+    .patterns-list li { padding: 0.5rem 0; padding-left: 1.5rem; position: relative; color: var(--gray-700); }
+    .patterns-list li::before { content: "🔹"; position: absolute; left: 0; }
+
+    .analysis-placeholder, .analysis-error { text-align: center; padding: 2rem; }
+
+    .loading-overlay {
       display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.9); z-index: 1000; align-items: center; justify-content: center;
+      flex-direction: column;
     }
-    .modal-overlay.visible { display: flex; }
-    .modal {
-      background: white; border-radius: 1rem; padding: 2rem; max-width: 500px; width: 90%;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+    .loading-overlay.visible { display: flex; }
+    .loading-spinner {
+      width: 48px; height: 48px; border: 4px solid var(--gray-200);
+      border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite;
     }
-    .modal h3 { font-size: 1.25rem; margin-bottom: 1rem; }
-    .modal p { color: var(--gray-700); margin-bottom: 1rem; }
-    .modal code {
-      display: block; background: var(--gray-900); color: #10B981; padding: 1rem;
-      border-radius: 0.5rem; font-size: 0.875rem; margin: 1rem 0; overflow-x: auto;
-    }
-    .modal-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
-    .modal-btn {
-      flex: 1; padding: 0.75rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer;
-      border: none; font-size: 0.875rem;
-    }
-    .modal-btn-copy { background: var(--primary); color: white; }
-    .modal-btn-copy:hover { background: #2563EB; }
-    .modal-btn-close { background: var(--gray-100); color: var(--gray-700); }
-    .modal-btn-close:hover { background: var(--gray-200); }
-    .copy-success { color: var(--success); font-size: 0.875rem; text-align: center; margin-top: 0.5rem; display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { margin-top: 1rem; color: var(--gray-600); font-size: 0.95rem; }
 
     @media (max-width: 768px) {
       .grid { grid-template-columns: 1fr; }
       .chart-container { flex-direction: column; }
       .action-bar { flex-direction: column; }
+      .summary-card { flex-direction: column; text-align: center; }
+      .insights-grid, .highlights-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -495,9 +764,6 @@ function generateHTML(data, date) {
 
     ${hasData ? `
     <div class="action-bar">
-      <button class="action-btn action-btn-primary" onclick="showAnalysisModal()">
-        <span>✨</span> Run AI Analysis
-      </button>
       <button class="action-btn action-btn-secondary" onclick="location.reload()">
         <span>↻</span> Refresh
       </button>
@@ -533,6 +799,8 @@ function generateHTML(data, date) {
       <h2>Activity by Hour</h2>
       ${generateHourlyHeatmap(data.hourly_pattern)}
     </div>
+
+    ${generateAnalysisSection(analysis)}
     ` : `
     <div class="card">
       <p class="no-data">No activity data recorded yet today. Start tracking to see your dashboard!</p>
@@ -540,23 +808,8 @@ function generateHTML(data, date) {
     `}
 
     <footer>
-      <p>Quick Dashboard &bull; Click categories to see details &bull; Refresh page to update</p>
+      <p>Productivity Dashboard &bull; Click categories to see details &bull; Refresh page to update</p>
     </footer>
-  </div>
-
-  <!-- AI Analysis Modal -->
-  <div class="modal-overlay" id="analysisModal">
-    <div class="modal">
-      <h3>✨ Run AI Analysis</h3>
-      <p>Get personalized productivity insights powered by Claude AI. Run this command in your terminal:</p>
-      <code>cd ~/Code/productivity-analyzer && npm run analyze && npm run report</code>
-      <p style="font-size: 0.875rem;">This will analyze your day and generate a detailed report with recommendations.</p>
-      <div class="modal-actions">
-        <button class="modal-btn modal-btn-copy" onclick="copyCommand()">Copy Command</button>
-        <button class="modal-btn modal-btn-close" onclick="hideAnalysisModal()">Close</button>
-      </div>
-      <div class="copy-success" id="copySuccess">✓ Copied to clipboard!</div>
-    </div>
   </div>
 
   <script>
@@ -587,42 +840,12 @@ function generateHTML(data, date) {
         if (legendItem) legendItem.click();
       });
     });
-
-    // Modal functions
-    function showAnalysisModal() {
-      document.getElementById('analysisModal').classList.add('visible');
-    }
-
-    function hideAnalysisModal() {
-      document.getElementById('analysisModal').classList.remove('visible');
-      document.getElementById('copySuccess').style.display = 'none';
-    }
-
-    function copyCommand() {
-      const cmd = 'cd ~/Code/productivity-analyzer && npm run analyze && npm run report';
-      navigator.clipboard.writeText(cmd).then(() => {
-        document.getElementById('copySuccess').style.display = 'block';
-        setTimeout(() => {
-          document.getElementById('copySuccess').style.display = 'none';
-        }, 2000);
-      });
-    }
-
-    // Close modal on overlay click
-    document.getElementById('analysisModal').addEventListener('click', (e) => {
-      if (e.target.id === 'analysisModal') hideAnalysisModal();
-    });
-
-    // Close modal on Escape
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') hideAnalysisModal();
-    });
   </script>
 </body>
 </html>`;
 }
 
-function generateDashboard() {
+async function generateDashboard(shouldRunAnalysis = false) {
   const date = getTodayDate();
 
   // Ensure reports directory exists
@@ -631,18 +854,33 @@ function generateDashboard() {
   }
 
   const data = getDataForDate(date);
-  const html = generateHTML(data, date);
+
+  // Load or run analysis
+  let analysis = loadExistingAnalysis(date);
+
+  if (!analysis && shouldRunAnalysis && data && data.summary.total_active_minutes > 0) {
+    console.log('Running AI analysis...');
+    analysis = await runAnalysis(data, date);
+    if (!analysis.error) {
+      console.log('Analysis complete!');
+    }
+  }
+
+  const html = generateHTML(data, date, analysis);
   const outputPath = path.join(REPORTS_DIR, 'dashboard.html');
   fs.writeFileSync(outputPath, html);
   console.log(outputPath);
   return outputPath;
 }
 
+// Check for --analyze flag
+const shouldRunAnalysis = process.argv.includes('--analyze');
+
 // If running via Electron, wait for app ready then quit
 if (app) {
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     try {
-      generateDashboard();
+      await generateDashboard(shouldRunAnalysis);
     } catch (err) {
       console.error('Error generating dashboard:', err.message);
       process.exitCode = 1;
@@ -651,10 +889,12 @@ if (app) {
   });
 } else {
   // Running via regular node
-  try {
-    generateDashboard();
-  } catch (err) {
-    console.error('Error generating dashboard:', err.message);
-    process.exit(1);
-  }
+  (async () => {
+    try {
+      await generateDashboard(shouldRunAnalysis);
+    } catch (err) {
+      console.error('Error generating dashboard:', err.message);
+      process.exit(1);
+    }
+  })();
 }
