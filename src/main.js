@@ -252,27 +252,43 @@ async function init() {
   console.log('========================================');
 }
 
-// App lifecycle
-app.whenReady().then(init);
-
-app.on('window-all-closed', (e) => {
-  // Prevent default behavior of quitting
-  e.preventDefault();
-});
-
-app.on('before-quit', () => {
-  // Stop capture and clean up
-  stopCapture();
-
-  if (statsUpdateInterval) {
-    clearInterval(statsUpdateInterval);
-  }
-
-  closeDatabase();
-});
-
-// Handle second instance
+// Handle second instance - must be done early
 const gotTheLock = app.requestSingleInstanceLock();
+console.log('Single instance lock:', gotTheLock ? 'acquired' : 'FAILED (another instance running?)');
+
 if (!gotTheLock) {
+  console.log('Another instance is already running. Exiting.');
   app.quit();
+} else {
+  // App lifecycle
+  console.log('Waiting for app to be ready...');
+
+  app.whenReady().then(() => {
+    console.log('App is ready!');
+    init();
+  }).catch(err => {
+    console.error('Error in init:', err);
+  });
+
+  app.on('window-all-closed', (e) => {
+    // Prevent quitting - we're a tray app with no windows
+    e.preventDefault();
+  });
+
+  // Keep the app running even with no windows
+  app.on('activate', () => {
+    console.log('App activated');
+  });
+
+  app.on('before-quit', () => {
+    console.log('App quitting...');
+    // Stop capture and clean up
+    if (stopCapture) stopCapture();
+
+    if (statsUpdateInterval) {
+      clearInterval(statsUpdateInterval);
+    }
+
+    if (closeDatabase) closeDatabase();
+  });
 }
