@@ -3,11 +3,43 @@ process.on('uncaughtException', (error) => {
   console.error('UNCAUGHT EXCEPTION:', error);
 });
 
-const { app, Tray, Menu, nativeImage, shell } = require('electron');
+console.log('Loading Electron modules...');
+const { app, Tray, Menu, nativeImage, shell, dialog } = require('electron');
 const path = require('path');
-const { initDatabase, getCategoryStats, getDaySummary, cleanupOldData, closeDatabase } = require('./database');
-const { startCapture, stopCapture, isCaptureRunning } = require('./capture');
-const { getCategoryLabel, getCategoryColor } = require('./categorize');
+
+console.log('Loading app modules...');
+
+let database, capture, categorize;
+let loadError = null;
+
+try {
+  database = require('./database');
+  console.log('✓ Database module loaded');
+} catch (err) {
+  console.error('✗ Failed to load database module:', err.message);
+  loadError = err;
+}
+
+try {
+  capture = require('./capture');
+  console.log('✓ Capture module loaded');
+} catch (err) {
+  console.error('✗ Failed to load capture module:', err.message);
+  loadError = err;
+}
+
+try {
+  categorize = require('./categorize');
+  console.log('✓ Categorize module loaded');
+} catch (err) {
+  console.error('✗ Failed to load categorize module:', err.message);
+  loadError = err;
+}
+
+// Destructure after checking
+const { initDatabase, getCategoryStats, getDaySummary, cleanupOldData, closeDatabase } = database || {};
+const { startCapture, stopCapture, isCaptureRunning } = capture || {};
+const { getCategoryLabel, getCategoryColor } = categorize || {};
 
 let tray = null;
 let statsUpdateInterval = null;
@@ -174,6 +206,16 @@ async function init() {
   console.log('========================================');
   console.log('Productivity Tracker - Starting...');
   console.log('========================================');
+
+  // Show error dialog if modules failed to load
+  if (loadError) {
+    dialog.showErrorBox(
+      'Failed to start',
+      `A module failed to load: ${loadError.message}\n\nTry running:\nrm -rf node_modules\nnpm install`
+    );
+    app.quit();
+    return;
+  }
 
   // Initialize the database
   const { DB_PATH } = require('./database');
