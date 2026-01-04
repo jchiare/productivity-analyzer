@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "analyze": "node scripts/analyze.js",
-    "report": "node scripts/generate-report.js"
+    "report": "node scripts/generate-report.js",
+    "postinstall":"electron-rebuild"
   },
   "author": "",
   "license": "MIT",
@@ -17,5 +18,5 @@
     "dotenv": "^17.2.3",
     "electron": "^39.2.7"
   },
-  "devDependencies": {}
+  "devDependencies": {"@electron/rebuild": "^3.7.1"}
 }
