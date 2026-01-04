@@ -73,9 +73,30 @@
       cursor: pointer; transition: background 0.2s;
     }
     .legend-item:hover { background: var(--gray-100); }
+    .legend-item.expanded { background: var(--gray-100); }
+    .legend-item.expanded .legend-arrow { transform: rotate(90deg); }
     .legend-color { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
     .legend-label { flex: 1; color: var(--gray-700); }
     .legend-value { color: var(--gray-500); font-variant-numeric: tabular-nums; }
+    .legend-arrow { font-size: 0.6rem; color: var(--gray-400); transition: transform 0.2s; margin-left: 0.25rem; }
+
+    .category-details {
+      display: none; padding: 0.5rem 0 0.5rem 1.5rem; margin-bottom: 0.5rem;
+      border-left: 2px solid var(--gray-200); margin-left: 0.75rem; max-height: 200px; overflow-y: auto;
+    }
+    .category-details.visible { display: block; }
+    .detail-app { margin-bottom: 0.5rem; }
+    .detail-app-header { display: flex; justify-content: space-between; font-size: 0.75rem; }
+    .detail-app-name { font-weight: 500; color: var(--gray-700); }
+    .detail-app-time { color: var(--gray-500); font-variant-numeric: tabular-nums; }
+    .detail-title {
+      font-size: 0.7rem; color: var(--gray-500); padding-left: 0.5rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+    }
+    .no-details { font-size: 0.75rem; color: var(--gray-400); font-style: italic; }
+
+    .pie-slice { cursor: pointer; transition: opacity 0.2s; }
+    .pie-slice:hover { opacity: 0.8; }
 
     .hourly-heatmap { margin-top: 0.5rem; }
     .heatmap-grid { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
@@ -270,8 +291,44 @@
       }
     }
 
+    // Generate category details HTML
+    function generateCategoryDetails(category, details) {
+      if (!details || details.length === 0) {
+        return '<div class="no-details">No detailed data</div>';
+      }
+
+      // Group by app and aggregate
+      const appGroups = {};
+      for (const d of details) {
+        const app = d.app_name || 'Unknown';
+        if (!appGroups[app]) appGroups[app] = { minutes: 0, titles: [] };
+        appGroups[app].minutes += d.minutes;
+        if (d.window_title && appGroups[app].titles.length < 3) {
+          appGroups[app].titles.push({ title: d.window_title, minutes: d.minutes });
+        }
+      }
+
+      const sortedApps = Object.entries(appGroups)
+        .sort((a, b) => b[1].minutes - a[1].minutes)
+        .slice(0, 8);
+
+      return sortedApps.map(([appName, data]) => {
+        const titlesHtml = data.titles
+          .slice(0, 2)
+          .map(t => `<div class="detail-title">${escapeHtml(t.title.substring(0, 60))}${t.title.length > 60 ? '...' : ''}</div>`)
+          .join('');
+        return `<div class="detail-app">
+          <div class="detail-app-header">
+            <span class="detail-app-name">${escapeHtml(appName)}</span>
+            <span class="detail-app-time">${formatTime(data.minutes)}</span>
+          </div>
+          ${titlesHtml}
+        </div>`;
+      }).join('');
+    }
+
     // Generate pie chart SVG
-    function generatePieChart(categories) {
+    function generatePieChart(categories, categoryDetails) {
       const total = categories.reduce((sum, c) => sum + c.minutes, 0);
       if (total === 0) return '<p class="no-data">No data yet</p>';
 
@@ -300,17 +357,24 @@
 
         if (angle < 360) {
           paths += `<path d="M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z"
-            fill="${color}" stroke="white" stroke-width="2">
+            fill="${color}" stroke="white" stroke-width="2" class="pie-slice" data-category="${cat.category}">
             <title>${cat.label}: ${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</title>
           </path>`;
         } else {
-          paths += `<circle cx="${center}" cy="${center}" r="${radius}" fill="${color}" />`;
+          paths += `<circle cx="${center}" cy="${center}" r="${radius}" fill="${color}" class="pie-slice" data-category="${cat.category}" />`;
         }
 
-        legend += `<div class="legend-item">
+        const details = categoryDetails ? categoryDetails[cat.category] : null;
+        const detailHtml = generateCategoryDetails(cat.category, details);
+
+        legend += `<div class="legend-item" data-category="${cat.category}" onclick="toggleCategory('${cat.category}')">
           <span class="legend-color" style="background: ${color}"></span>
           <span class="legend-label">${escapeHtml(cat.label)}</span>
           <span class="legend-value">${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</span>
+          <span class="legend-arrow">&#9654;</span>
+        </div>
+        <div class="category-details" id="details-${cat.category}">
+          ${detailHtml}
         </div>`;
         currentAngle = endAngle;
       });
@@ -319,6 +383,23 @@
         <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>
         <div class="legend">${legend}</div>
       </div>`;
+    }
+
+    // Toggle category details
+    function toggleCategory(category) {
+      const item = document.querySelector(`.legend-item[data-category="${category}"]`);
+      const details = document.getElementById('details-' + category);
+      const isExpanded = item.classList.contains('expanded');
+
+      // Close all others
+      document.querySelectorAll('.legend-item').forEach(i => i.classList.remove('expanded'));
+      document.querySelectorAll('.category-details').forEach(d => d.classList.remove('visible'));
+
+      // Toggle current
+      if (!isExpanded && details) {
+        item.classList.add('expanded');
+        details.classList.add('visible');
+      }
     }
 
     // Generate hourly heatmap
@@ -516,8 +597,8 @@
 
         <div class="grid">
           <div class="card">
-            <h2>Time by Category</h2>
-            ${generatePieChart(data.category_breakdown)}
+            <h2>Time by Category <span style="font-size: 0.75rem; color: var(--gray-500); font-weight: normal;">(click to expand)</span></h2>
+            ${generatePieChart(data.category_breakdown, data.category_details)}
           </div>
           <div class="card">
             <h2>Top Applications</h2>
@@ -534,6 +615,14 @@
       `;
 
       updateAnalyzeButton();
+
+      // Add pie slice click handlers
+      document.querySelectorAll('.pie-slice').forEach(slice => {
+        slice.addEventListener('click', () => {
+          const category = slice.dataset.category;
+          if (category) toggleCategory(category);
+        });
+      });
     }
 
     // Refresh dashboard
