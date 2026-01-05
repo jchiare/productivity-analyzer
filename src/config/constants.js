@@ -38,6 +38,38 @@ const CATEGORY_LABELS = {
   other: 'Other'
 };
 
+// Category hierarchy - maps parent categories to their children
+const CATEGORY_HIERARCHY = {
+  'Development': {
+    color: '#10B981',
+    children: ['coding']
+  },
+  'Work': {
+    color: '#8B5CF6',
+    children: ['work_browsing', 'writing', 'design', 'productivity', 'finance']
+  },
+  'Communication': {
+    color: '#3B82F6',
+    children: ['communication']
+  },
+  'Browsing': {
+    color: '#F59E0B',
+    children: ['browsing', 'social_media', 'entertainment']
+  },
+  'Other': {
+    color: '#6B7280',
+    children: ['other', 'idle']
+  }
+};
+
+// Reverse lookup: child category -> parent category
+const CATEGORY_TO_PARENT = {};
+for (const [parent, config] of Object.entries(CATEGORY_HIERARCHY)) {
+  for (const child of config.children) {
+    CATEGORY_TO_PARENT[child] = parent;
+  }
+}
+
 // Server config
 const PORT = process.env.PORT || 3456;
 
@@ -47,5 +79,7 @@ module.exports = {
   REPORTS_DIR,
   CATEGORY_COLORS,
   CATEGORY_LABELS,
+  CATEGORY_HIERARCHY,
+  CATEGORY_TO_PARENT,
   PORT
 };

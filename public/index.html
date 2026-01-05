@@ -103,10 +103,30 @@
     .legend-arrow { font-size: 0.6rem; color: var(--gray-400); transition: transform 0.2s; margin-left: 0.25rem; }
 
     .category-details {
-      display: none; padding: 0.5rem 0 0.5rem 1.5rem; margin-bottom: 0.5rem;
-      border-left: 2px solid var(--gray-200); margin-left: 0.75rem; max-height: 200px; overflow-y: auto;
+      display: none; padding: 0.5rem 0 0.5rem 1rem; margin-bottom: 0.5rem;
+      border-left: 2px solid var(--gray-200); margin-left: 0.75rem; max-height: 300px; overflow-y: auto;
     }
     .category-details.visible { display: block; }
+
+    .subcategory-item {
+      display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;
+      font-size: 0.75rem; padding: 0.3rem 0.4rem; border-radius: 0.25rem;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .subcategory-item:hover { background: var(--gray-100); }
+    .subcategory-item.expanded { background: var(--gray-100); }
+    .subcategory-color { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .subcategory-label { flex: 1; color: var(--gray-700); }
+    .subcategory-value { color: var(--gray-500); font-variant-numeric: tabular-nums; }
+    .subcategory-arrow { font-size: 0.5rem; color: var(--gray-400); transition: transform 0.2s; }
+    .subcategory-item.expanded .subcategory-arrow { transform: rotate(90deg); }
+
+    .app-details {
+      display: none; padding: 0.4rem 0 0.4rem 1rem; margin-bottom: 0.25rem;
+      border-left: 2px solid var(--gray-200); margin-left: 0.5rem; max-height: 150px; overflow-y: auto;
+    }
+    .app-details.visible { display: block; }
+
     .detail-app { margin-bottom: 0.5rem; }
     .detail-app-header { display: flex; justify-content: space-between; font-size: 0.75rem; }
     .detail-app-name { font-weight: 500; color: var(--gray-700); }
@@ -361,8 +381,8 @@
       }
     }
 
-    // Generate category details HTML
-    function generateCategoryDetails(category, details) {
+    // Generate app details HTML for a subcategory
+    function generateAppDetails(details) {
       if (!details || details.length === 0) {
         return '<div class="no-details">No detailed data</div>';
       }
@@ -380,12 +400,12 @@
 
       const sortedApps = Object.entries(appGroups)
         .sort((a, b) => b[1].minutes - a[1].minutes)
-        .slice(0, 8);
+        .slice(0, 6);
 
       return sortedApps.map(([appName, data]) => {
         const titlesHtml = data.titles
           .slice(0, 2)
-          .map(t => `<div class="detail-title">${escapeHtml(t.title.substring(0, 60))}${t.title.length > 60 ? '...' : ''}</div>`)
+          .map(t => `<div class="detail-title">${escapeHtml(t.title.substring(0, 50))}${t.title.length > 50 ? '...' : ''}</div>`)
           .join('');
         return `<div class="detail-app">
           <div class="detail-app-header">
@@ -397,9 +417,32 @@
       }).join('');
     }
 
-    // Generate pie chart SVG
-    function generatePieChart(categories, categoryDetails) {
-      const total = categories.reduce((sum, c) => sum + c.minutes, 0);
+    // Generate subcategory items for a parent category
+    function generateSubcategoryItems(parentCategory, subcategories, total) {
+      if (!subcategories || subcategories.length === 0) {
+        return '<div class="no-details">No subcategories</div>';
+      }
+
+      return subcategories.map(sub => {
+        const percentage = total > 0 ? (sub.minutes / total) * 100 : 0;
+        const appDetailsHtml = generateAppDetails(sub.details);
+        const subId = `${parentCategory}-${sub.category}`.replace(/\s+/g, '-');
+
+        return `<div class="subcategory-item" data-subcategory="${subId}" onclick="toggleSubcategory('${subId}', event)">
+          <span class="subcategory-color" style="background: ${sub.color}"></span>
+          <span class="subcategory-label">${escapeHtml(sub.label)}</span>
+          <span class="subcategory-value">${formatTime(sub.minutes)} (${percentage.toFixed(1)}%)</span>
+          <span class="subcategory-arrow">&#9654;</span>
+        </div>
+        <div class="app-details" id="app-details-${subId}">
+          ${appDetailsHtml}
+        </div>`;
+      }).join('');
+    }
+
+    // Generate pie chart SVG with hierarchical categories
+    function generatePieChart(hierarchicalCategories) {
+      const total = hierarchicalCategories.reduce((sum, c) => sum + c.minutes, 0);
       if (total === 0) return '<p class="no-data">No data yet</p>';
 
       const size = 200;
@@ -409,7 +452,7 @@
       let paths = '';
       let legend = '';
 
-      categories.forEach(cat => {
+      hierarchicalCategories.forEach(cat => {
         if (cat.minutes === 0) return;
         const percentage = (cat.minutes / total) * 100;
         const angle = (cat.minutes / total) * 360;
@@ -425,26 +468,27 @@
         const y2 = center + radius * Math.sin(endRad);
         const largeArc = angle > 180 ? 1 : 0;
 
+        const catId = cat.category.replace(/\s+/g, '-');
+
         if (angle < 360) {
           paths += `<path d="M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z"
-            fill="${color}" stroke="white" stroke-width="2" class="pie-slice" data-category="${cat.category}">
+            fill="${color}" stroke="white" stroke-width="2" class="pie-slice" data-category="${catId}">
             <title>${cat.label}: ${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</title>
           </path>`;
         } else {
-          paths += `<circle cx="${center}" cy="${center}" r="${radius}" fill="${color}" class="pie-slice" data-category="${cat.category}" />`;
+          paths += `<circle cx="${center}" cy="${center}" r="${radius}" fill="${color}" class="pie-slice" data-category="${catId}" />`;
         }
 
-        const details = categoryDetails ? categoryDetails[cat.category] : null;
-        const detailHtml = generateCategoryDetails(cat.category, details);
+        const subcategoryHtml = generateSubcategoryItems(catId, cat.subcategories, cat.minutes);
 
-        legend += `<div class="legend-item" data-category="${cat.category}" onclick="toggleCategory('${cat.category}')">
+        legend += `<div class="legend-item" data-category="${catId}" onclick="toggleCategory('${catId}')">
           <span class="legend-color" style="background: ${color}"></span>
           <span class="legend-label">${escapeHtml(cat.label)}</span>
           <span class="legend-value">${formatTime(cat.minutes)} (${percentage.toFixed(1)}%)</span>
           <span class="legend-arrow">&#9654;</span>
         </div>
-        <div class="category-details" id="details-${cat.category}">
-          ${detailHtml}
+        <div class="category-details" id="details-${catId}">
+          ${subcategoryHtml}
         </div>`;
         currentAngle = endAngle;
       });
@@ -455,18 +499,40 @@
       </div>`;
     }
 
-    // Toggle category details
+    // Toggle parent category to show subcategories
     function toggleCategory(category) {
       const item = document.querySelector(`.legend-item[data-category="${category}"]`);
       const details = document.getElementById('details-' + category);
-      const isExpanded = item.classList.contains('expanded');
+      const isExpanded = item && item.classList.contains('expanded');
 
-      // Close all others
+      // Close all parent categories
       document.querySelectorAll('.legend-item').forEach(i => i.classList.remove('expanded'));
       document.querySelectorAll('.category-details').forEach(d => d.classList.remove('visible'));
 
+      // Also close all subcategories
+      document.querySelectorAll('.subcategory-item').forEach(i => i.classList.remove('expanded'));
+      document.querySelectorAll('.app-details').forEach(d => d.classList.remove('visible'));
+
       // Toggle current
-      if (!isExpanded && details) {
+      if (!isExpanded && details && item) {
+        item.classList.add('expanded');
+        details.classList.add('visible');
+      }
+    }
+
+    // Toggle subcategory to show app details
+    function toggleSubcategory(subcategoryId, event) {
+      event.stopPropagation();
+      const item = document.querySelector(`.subcategory-item[data-subcategory="${subcategoryId}"]`);
+      const details = document.getElementById('app-details-' + subcategoryId);
+      const isExpanded = item && item.classList.contains('expanded');
+
+      // Close all other subcategories
+      document.querySelectorAll('.subcategory-item').forEach(i => i.classList.remove('expanded'));
+      document.querySelectorAll('.app-details').forEach(d => d.classList.remove('visible'));
+
+      // Toggle current
+      if (!isExpanded && details && item) {
         item.classList.add('expanded');
         details.classList.add('visible');
       }
@@ -679,7 +745,7 @@
         <div class="grid">
           <div class="card">
             <h2>Time by Category <span style="font-size: 0.75rem; color: var(--gray-500); font-weight: normal;">(click to expand)</span></h2>
-            ${generatePieChart(data.category_breakdown, data.category_details)}
+            ${generatePieChart(data.category_hierarchy || data.category_breakdown)}
           </div>
           <div class="card">
             <h2>Top Applications</h2>
