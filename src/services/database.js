@@ -1,16 +1,64 @@
 const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const Database = require('better-sqlite3');
 const { DB_PATH, CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_HIERARCHY, CATEGORY_TO_PARENT } = require('../config/constants');
+
+// Path to learned categories
+const LEARNED_CATEGORIES_PATH = path.join(
+  os.homedir(),
+  'Library',
+  'Application Support',
+  'productivity-tracker',
+  'learned-categories.json'
+);
+
+/**
+ * Load learned categories and merge with static hierarchy
+ */
+function getEffectiveHierarchy() {
+  // Start with static hierarchy
+  const hierarchy = JSON.parse(JSON.stringify(CATEGORY_HIERARCHY));
+  const categoryToParent = { ...CATEGORY_TO_PARENT };
+
+  // Load learned patterns
+  if (fs.existsSync(LEARNED_CATEGORIES_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(LEARNED_CATEGORIES_PATH, 'utf8'));
+      const patterns = data.patterns || [];
+
+      for (const pattern of patterns) {
+        const categoryName = pattern.suggestedName || pattern.patternKey;
+        const parentName = pattern.suggestedParent || pattern.parentCategory || 'Browsing';
+
+        // Add to parent category's children
+        if (hierarchy[parentName]) {
+          if (!hierarchy[parentName].children.includes(categoryName)) {
+            hierarchy[parentName].children.push(categoryName);
+          }
+        }
+
+        // Add to reverse lookup
+        categoryToParent[categoryName] = parentName;
+      }
+    } catch (e) {
+      // Ignore errors, use static hierarchy
+    }
+  }
+
+  return { hierarchy, categoryToParent };
+}
 
 /**
  * Aggregate category breakdown by parent category
  */
 function aggregateByParentCategory(categoryBreakdown, categoryDetails) {
+  const { hierarchy, categoryToParent } = getEffectiveHierarchy();
   const parentAggregates = {};
 
   for (const cat of categoryBreakdown) {
-    const parentName = CATEGORY_TO_PARENT[cat.category] || 'Other';
-    const parentConfig = CATEGORY_HIERARCHY[parentName] || CATEGORY_HIERARCHY['Other'];
+    const parentName = categoryToParent[cat.category] || 'Other';
+    const parentConfig = hierarchy[parentName] || hierarchy['Other'];
 
     if (!parentAggregates[parentName]) {
       parentAggregates[parentName] = {
@@ -25,10 +73,38 @@ function aggregateByParentCategory(categoryBreakdown, categoryDetails) {
 
     parentAggregates[parentName].minutes += cat.minutes;
     parentAggregates[parentName].record_count += cat.record_count;
+
+    // Get label - check learned patterns for custom labels
+    let label = CATEGORY_LABELS[cat.category];
+    let color = CATEGORY_COLORS[cat.category];
+
+    if (!label) {
+      // Check if it's a learned pattern
+      if (fs.existsSync(LEARNED_CATEGORIES_PATH)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(LEARNED_CATEGORIES_PATH, 'utf8'));
+          const learnedPattern = (data.patterns || []).find(
+            p => (p.suggestedName || p.patternKey) === cat.category
+          );
+          if (learnedPattern) {
+            label = learnedPattern.suggestedLabel || learnedPattern.patternKey;
+            // Use parent's color for learned categories
+            color = parentConfig.color;
+          }
+        } catch (e) {
+          // Use defaults
+        }
+      }
+      if (!label) {
+        // Fallback: capitalize the category name
+        label = cat.category.charAt(0).toUpperCase() + cat.category.slice(1).replace(/_/g, ' ');
+      }
+    }
+
     parentAggregates[parentName].subcategories.push({
       category: cat.category,
-      label: CATEGORY_LABELS[cat.category] || cat.category,
-      color: CATEGORY_COLORS[cat.category] || CATEGORY_COLORS.other,
+      label: label,
+      color: color || CATEGORY_COLORS.other,
       minutes: cat.minutes,
       record_count: cat.record_count,
       details: categoryDetails[cat.category] || []
