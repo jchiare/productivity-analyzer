@@ -1,17 +1,30 @@
 const fs = require('fs');
-const path = require('path');
-const os = require('os');
 const Database = require('better-sqlite3');
-const { DB_PATH, CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_HIERARCHY, CATEGORY_TO_PARENT } = require('../config/constants');
+const { DB_PATH, CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_HIERARCHY, CATEGORY_TO_PARENT, LEARNED_CATEGORIES_PATH } = require('../config/constants');
 
-// Path to learned categories
-const LEARNED_CATEGORIES_PATH = path.join(
-  os.homedir(),
-  'Library',
-  'Application Support',
-  'productivity-tracker',
-  'learned-categories.json'
-);
+// Cache for learned patterns
+let learnedPatternsCache = null;
+let learnedPatternsCacheTime = 0;
+const CACHE_TTL_MS = 30000; // 30 seconds
+
+function loadLearnedPatternsWithCache() {
+  const now = Date.now();
+  if (learnedPatternsCache && (now - learnedPatternsCacheTime) < CACHE_TTL_MS) {
+    return learnedPatternsCache;
+  }
+
+  if (fs.existsSync(LEARNED_CATEGORIES_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(LEARNED_CATEGORIES_PATH, 'utf8'));
+      learnedPatternsCache = data.patterns || [];
+      learnedPatternsCacheTime = now;
+      return learnedPatternsCache;
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
 
 /**
  * Load learned categories and merge with static hierarchy
@@ -21,39 +34,32 @@ function getEffectiveHierarchy() {
   const hierarchy = JSON.parse(JSON.stringify(CATEGORY_HIERARCHY));
   const categoryToParent = { ...CATEGORY_TO_PARENT };
 
-  // Load learned patterns
-  if (fs.existsSync(LEARNED_CATEGORIES_PATH)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(LEARNED_CATEGORIES_PATH, 'utf8'));
-      const patterns = data.patterns || [];
+  // Load learned patterns (cached)
+  const patterns = loadLearnedPatternsWithCache();
 
-      for (const pattern of patterns) {
-        const categoryName = pattern.suggestedName || pattern.patternKey;
-        const parentName = pattern.suggestedParent || pattern.parentCategory || 'Browsing';
+  for (const pattern of patterns) {
+    const categoryName = pattern.suggestedName || pattern.patternKey;
+    const parentName = pattern.suggestedParent || pattern.parentCategory || 'Browsing';
 
-        // Add to parent category's children
-        if (hierarchy[parentName]) {
-          if (!hierarchy[parentName].children.includes(categoryName)) {
-            hierarchy[parentName].children.push(categoryName);
-          }
-        }
-
-        // Add to reverse lookup
-        categoryToParent[categoryName] = parentName;
+    // Add to parent category's children
+    if (hierarchy[parentName]) {
+      if (!hierarchy[parentName].children.includes(categoryName)) {
+        hierarchy[parentName].children.push(categoryName);
       }
-    } catch (e) {
-      // Ignore errors, use static hierarchy
     }
+
+    // Add to reverse lookup
+    categoryToParent[categoryName] = parentName;
   }
 
-  return { hierarchy, categoryToParent };
+  return { hierarchy, categoryToParent, patterns };
 }
 
 /**
  * Aggregate category breakdown by parent category
  */
 function aggregateByParentCategory(categoryBreakdown, categoryDetails) {
-  const { hierarchy, categoryToParent } = getEffectiveHierarchy();
+  const { hierarchy, categoryToParent, patterns } = getEffectiveHierarchy();
   const parentAggregates = {};
 
   for (const cat of categoryBreakdown) {
@@ -79,23 +85,15 @@ function aggregateByParentCategory(categoryBreakdown, categoryDetails) {
     let color = CATEGORY_COLORS[cat.category];
 
     if (!label) {
-      // Check if it's a learned pattern
-      if (fs.existsSync(LEARNED_CATEGORIES_PATH)) {
-        try {
-          const data = JSON.parse(fs.readFileSync(LEARNED_CATEGORIES_PATH, 'utf8'));
-          const learnedPattern = (data.patterns || []).find(
-            p => (p.suggestedName || p.patternKey) === cat.category
-          );
-          if (learnedPattern) {
-            label = learnedPattern.suggestedLabel || learnedPattern.patternKey;
-            // Use parent's color for learned categories
-            color = parentConfig.color;
-          }
-        } catch (e) {
-          // Use defaults
-        }
-      }
-      if (!label) {
+      // Check if it's a learned pattern (use cached patterns)
+      const learnedPattern = patterns.find(
+        p => (p.suggestedName || p.patternKey) === cat.category
+      );
+      if (learnedPattern) {
+        label = learnedPattern.suggestedLabel || learnedPattern.patternKey;
+        // Use parent's color for learned categories
+        color = parentConfig.color;
+      } else {
         // Fallback: capitalize the category name
         label = cat.category.charAt(0).toUpperCase() + cat.category.slice(1).replace(/_/g, ' ');
       }

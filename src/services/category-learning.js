@@ -1,11 +1,7 @@
 const fs = require('fs');
-const path = require('path');
 const Database = require('better-sqlite3');
 const Anthropic = require('@anthropic-ai/sdk');
-const { DB_PATH, APP_SUPPORT_DIR, CATEGORY_HIERARCHY, CATEGORY_TO_PARENT } = require('../config/constants');
-
-// Path to store learned categories
-const LEARNED_CATEGORIES_PATH = path.join(APP_SUPPORT_DIR, 'learned-categories.json');
+const { DB_PATH, CATEGORY_HIERARCHY, CATEGORY_TO_PARENT, LEARNED_CATEGORIES_PATH } = require('../config/constants');
 
 // Threshold for suggesting a new category (percentage of parent category time)
 const SUGGESTION_THRESHOLD = 0.15; // 15%

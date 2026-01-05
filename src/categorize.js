@@ -3,17 +3,7 @@
  */
 
 const fs = require('fs');
-const path = require('path');
-const os = require('os');
-
-// Path to learned categories
-const LEARNED_CATEGORIES_PATH = path.join(
-  os.homedir(),
-  'Library',
-  'Application Support',
-  'productivity-tracker',
-  'learned-categories.json'
-);
+const { LEARNED_CATEGORIES_PATH } = require('./config/constants');
 
 // Cache for learned patterns (refreshed periodically)
 let learnedPatternsCache = null;

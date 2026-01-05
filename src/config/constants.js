@@ -73,6 +73,9 @@ for (const [parent, config] of Object.entries(CATEGORY_HIERARCHY)) {
 // Server config
 const PORT = process.env.PORT || 3456;
 
+// Learned categories path
+const LEARNED_CATEGORIES_PATH = path.join(APP_SUPPORT_DIR, 'learned-categories.json');
+
 module.exports = {
   APP_SUPPORT_DIR,
   DB_PATH,
@@ -81,5 +84,6 @@ module.exports = {
   CATEGORY_LABELS,
   CATEGORY_HIERARCHY,
   CATEGORY_TO_PARENT,
+  LEARNED_CATEGORIES_PATH,
   PORT
 };

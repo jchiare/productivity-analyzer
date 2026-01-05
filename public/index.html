@@ -749,6 +749,9 @@
           <button class="action-btn action-btn-secondary" onclick="loadCategorySuggestions()">
             <span>&#x1F4A1;</span> Category Suggestions
           </button>
+          <button class="action-btn action-btn-secondary" onclick="loadLearnedCategories()">
+            <span>&#x1F4DD;</span> Manage Learned
+          </button>
           <button class="action-btn action-btn-secondary" onclick="refreshDashboard()">
             <span>&#x21bb;</span> Refresh
           </button>
@@ -900,6 +903,9 @@
           item.style.background = '#D1FAE5';
           item.innerHTML = `<div style="color:var(--success);font-weight:500;">&#x2713; Added "${escapeHtml(suggestion.suggestedLabel || suggestion.patternKey)}" as a new category</div>`;
         }
+
+        // Refresh dashboard to show the new category in the hierarchy
+        setTimeout(() => refreshDashboard(), 500);
       } catch (err) {
         alert('Error applying suggestion: ' + err.message);
       }
@@ -908,6 +914,92 @@
     function dismissSuggestion(index) {
       const item = document.getElementById(`suggestion-${index}`);
       if (item) item.remove();
+    }
+
+    // Learned Categories Management
+    async function loadLearnedCategories() {
+      const existingModal = document.getElementById('learnedModal');
+      if (existingModal) existingModal.remove();
+
+      const modal = document.createElement('div');
+      modal.id = 'learnedModal';
+      modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;';
+      modal.innerHTML = `
+        <div style="background:white;border-radius:1rem;padding:2rem;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <h2 style="font-size:1.25rem;font-weight:600;">Learned Categories</h2>
+            <button onclick="closeLearnedModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--gray-500);">&times;</button>
+          </div>
+          <p style="color:var(--gray-500);font-size:0.875rem;margin-bottom:1rem;">
+            These are patterns you've approved. They're used to automatically categorize matching activity.
+          </p>
+          <div id="learnedContent" class="loading"><div class="spinner"></div></div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      modal.addEventListener('click', (e) => { if (e.target === modal) closeLearnedModal(); });
+
+      try {
+        const response = await fetch(`${API_BASE}/api/learned-categories`);
+        const data = await response.json();
+        const patterns = data.patterns || [];
+
+        const learnedContent = document.getElementById('learnedContent');
+        if (patterns.length === 0) {
+          learnedContent.innerHTML = `
+            <div class="suggestions-empty">
+              <p>No learned categories yet.</p>
+              <p style="font-size:0.8rem;margin-top:0.5rem;">Use "Category Suggestions" to add patterns that the system will learn from.</p>
+            </div>
+          `;
+        } else {
+          learnedContent.innerHTML = patterns.map((p, i) => `
+            <div class="suggestion-item" id="learned-${i}">
+              <div class="suggestion-info">
+                <div class="suggestion-pattern">${escapeHtml(p.suggestedLabel || p.patternKey)}</div>
+                <div class="suggestion-stats">
+                  Pattern: ${escapeHtml(p.patternKey)} &bull; Parent: ${escapeHtml(p.suggestedParent || p.parentCategory)}
+                </div>
+                <div class="suggestion-meta">Added: ${p.appliedAt ? new Date(p.appliedAt).toLocaleDateString() : 'Unknown'}</div>
+              </div>
+              <div class="suggestion-actions">
+                <button class="btn-dismiss" onclick="removeLearnedPattern('${escapeHtml(p.patternKey)}', ${i})" style="color:var(--danger);border-color:var(--danger);">Remove</button>
+              </div>
+            </div>
+          `).join('');
+        }
+      } catch (err) {
+        document.getElementById('learnedContent').innerHTML = `
+          <p class="error-message">Error loading learned categories: ${escapeHtml(err.message)}</p>
+        `;
+      }
+    }
+
+    function closeLearnedModal() {
+      const modal = document.getElementById('learnedModal');
+      if (modal) modal.remove();
+    }
+
+    async function removeLearnedPattern(patternKey, index) {
+      if (!confirm(`Remove "${patternKey}" from learned categories?`)) return;
+
+      try {
+        await fetch(`${API_BASE}/api/learned-categories/${encodeURIComponent(patternKey)}`, {
+          method: 'DELETE'
+        });
+
+        const item = document.getElementById(`learned-${index}`);
+        if (item) {
+          item.style.background = '#FEE2E2';
+          item.innerHTML = `<div style="color:var(--danger);font-weight:500;">&#x2717; Removed "${escapeHtml(patternKey)}"</div>`;
+          setTimeout(() => item.remove(), 1500);
+        }
+
+        // Refresh dashboard to reflect changes
+        setTimeout(() => refreshDashboard(), 500);
+      } catch (err) {
+        alert('Error removing pattern: ' + err.message);
+      }
     }
 
     // Initialize
