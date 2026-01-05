@@ -34,6 +34,28 @@
     }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
+    .date-nav {
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 1rem;
+    }
+    .date-nav-btn {
+      background: white; border: 1px solid var(--gray-200); border-radius: 0.5rem;
+      padding: 0.5rem 0.75rem; cursor: pointer; font-size: 1rem; color: var(--gray-700);
+      transition: all 0.2s;
+    }
+    .date-nav-btn:hover { background: var(--gray-50); border-color: var(--gray-300); }
+    .date-nav-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .date-input {
+      padding: 0.5rem 0.75rem; border: 1px solid var(--gray-200); border-radius: 0.5rem;
+      font-size: 0.9rem; color: var(--gray-700); cursor: pointer;
+    }
+    .today-btn {
+      background: var(--primary); color: white; border: none; border-radius: 0.5rem;
+      padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 500; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .today-btn:hover { background: #2563EB; }
+    .today-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
     .action-bar {
       display: flex; justify-content: center; gap: 1rem; margin-bottom: 1.5rem;
     }
@@ -198,9 +220,16 @@
 <body>
   <div class="container">
     <header>
-      <h1>Productivity Dashboard <span class="live-badge">LIVE</span></h1>
+      <h1>Productivity Dashboard <span class="live-badge" id="liveBadge">LIVE</span></h1>
       <p class="date" id="dateDisplay">Loading...</p>
     </header>
+
+    <div class="date-nav">
+      <button class="date-nav-btn" id="prevDayBtn" onclick="changeDate(-1)" title="Previous day">&#9664;</button>
+      <input type="date" class="date-input" id="dateInput" onchange="goToDate(this.value)">
+      <button class="date-nav-btn" id="nextDayBtn" onclick="changeDate(1)" title="Next day">&#9654;</button>
+      <button class="today-btn" id="todayBtn" onclick="goToToday()">Today</button>
+    </div>
 
     <div id="content">
       <div class="loading"><div class="spinner"></div></div>
@@ -231,14 +260,24 @@
       return div.innerHTML;
     }
 
+    function getTodayDate() {
+      return new Date().toISOString().split('T')[0];
+    }
+
+    function isToday(dateStr) {
+      return dateStr === getTodayDate();
+    }
+
     // State
     let dashboardData = null;
     let isAnalyzing = false;
+    let currentDate = getTodayDate();
 
     // Fetch dashboard data
-    async function fetchData() {
+    async function fetchData(date) {
       try {
-        const response = await fetch(`${API_BASE}/api/data`);
+        const dateParam = date || currentDate;
+        const response = await fetch(`${API_BASE}/api/data?date=${dateParam}`);
         if (!response.ok) {
           const err = await response.json();
           throw new Error(err.error || 'Failed to fetch data');
@@ -248,6 +287,37 @@
         console.error('Error fetching data:', err);
         throw err;
       }
+    }
+
+    // Date navigation functions
+    function changeDate(delta) {
+      const date = new Date(currentDate + 'T00:00:00');
+      date.setDate(date.getDate() + delta);
+      const newDate = date.toISOString().split('T')[0];
+      goToDate(newDate);
+    }
+
+    function goToDate(dateStr) {
+      if (!dateStr) return;
+      currentDate = dateStr;
+      updateDateUI();
+      refreshDashboard();
+    }
+
+    function goToToday() {
+      goToDate(getTodayDate());
+    }
+
+    function updateDateUI() {
+      const dateInput = document.getElementById('dateInput');
+      const todayBtn = document.getElementById('todayBtn');
+      const liveBadge = document.getElementById('liveBadge');
+      const nextDayBtn = document.getElementById('nextDayBtn');
+
+      if (dateInput) dateInput.value = currentDate;
+      if (todayBtn) todayBtn.disabled = isToday(currentDate);
+      if (liveBadge) liveBadge.style.display = isToday(currentDate) ? 'inline-block' : 'none';
+      if (nextDayBtn) nextDayBtn.disabled = isToday(currentDate);
     }
 
     // Run AI analysis
@@ -260,7 +330,7 @@
         const response = await fetch(`${API_BASE}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ force })
+          body: JSON.stringify({ date: currentDate, force })
         });
 
         if (!response.ok) {
@@ -558,17 +628,28 @@
       const content = document.getElementById('content');
 
       if (!data || !data.summary || data.summary.total_active_minutes === 0) {
+        const dateStr = new Date(currentDate + 'T00:00:00').toLocaleDateString('en-US', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+        });
+        const message = isToday(currentDate)
+          ? 'No activity data recorded yet today. Start tracking to see your dashboard!'
+          : `No activity data recorded for ${dateStr}.`;
         content.innerHTML = `<div class="card">
-          <p class="no-data">No activity data recorded yet today. Start tracking to see your dashboard!</p>
+          <p class="no-data">${message}</p>
         </div>`;
+        document.getElementById('dateDisplay').textContent = dateStr;
         return;
       }
 
       const formattedDate = new Date(data.date + 'T00:00:00').toLocaleDateString('en-US', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
       });
-      const timeStr = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      document.getElementById('dateDisplay').textContent = `${formattedDate} \u2022 Last updated: ${timeStr}`;
+      if (isToday(currentDate)) {
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        document.getElementById('dateDisplay').textContent = `${formattedDate} \u2022 Last updated: ${timeStr}`;
+      } else {
+        document.getElementById('dateDisplay').textContent = formattedDate;
+      }
 
       content.innerHTML = `
         <div class="action-bar">
@@ -639,6 +720,7 @@
     }
 
     // Initialize
+    updateDateUI();
     refreshDashboard();
   </script>
 </body>
