@@ -2,6 +2,57 @@
  * Local categorization rules for applications and window titles
  */
 
+const fs = require('fs');
+const { LEARNED_CATEGORIES_PATH } = require('./config/constants');
+
+// Cache for learned patterns (refreshed periodically)
+let learnedPatternsCache = null;
+let learnedPatternsCacheTime = 0;
+const CACHE_TTL_MS = 60000; // Refresh cache every minute
+
+/**
+ * Load learned patterns from disk (with caching)
+ */
+function getLearnedPatterns() {
+  const now = Date.now();
+  if (learnedPatternsCache && (now - learnedPatternsCacheTime) < CACHE_TTL_MS) {
+    return learnedPatternsCache;
+  }
+
+  if (fs.existsSync(LEARNED_CATEGORIES_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(LEARNED_CATEGORIES_PATH, 'utf8'));
+      learnedPatternsCache = data.patterns || [];
+      learnedPatternsCacheTime = now;
+      return learnedPatternsCache;
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Check if window title matches any learned pattern
+ */
+function checkLearnedPatterns(windowTitle) {
+  if (!windowTitle) return null;
+
+  const patterns = getLearnedPatterns();
+  const lowerTitle = windowTitle.toLowerCase();
+
+  for (const pattern of patterns) {
+    // Check if the pattern key appears in the window title
+    const patternKey = pattern.patternKey.toLowerCase();
+    if (lowerTitle.includes(patternKey) ||
+        lowerTitle.includes(patternKey.replace('.com', '').replace('.org', '').replace('.io', ''))) {
+      return pattern.suggestedName || pattern.patternKey;
+    }
+  }
+
+  return null;
+}
+
 // App name to category mapping (case-insensitive)
 const APP_CATEGORIES = {
   // Coding
@@ -310,6 +361,12 @@ function isBrowser(appName, bundleId) {
 function categorizeBrowserActivity(windowTitle) {
   if (!windowTitle) {
     return 'browsing';
+  }
+
+  // Check learned patterns first (user-defined categories take priority)
+  const learnedCategory = checkLearnedPatterns(windowTitle);
+  if (learnedCategory) {
+    return learnedCategory;
   }
 
   // Check patterns in order of priority

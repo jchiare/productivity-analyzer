@@ -1,6 +1,122 @@
 const fs = require('fs');
 const Database = require('better-sqlite3');
-const { DB_PATH, CATEGORY_COLORS, CATEGORY_LABELS } = require('../config/constants');
+const { DB_PATH, CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_HIERARCHY, CATEGORY_TO_PARENT, LEARNED_CATEGORIES_PATH } = require('../config/constants');
+
+// Cache for learned patterns
+let learnedPatternsCache = null;
+let learnedPatternsCacheTime = 0;
+const CACHE_TTL_MS = 30000; // 30 seconds
+
+function loadLearnedPatternsWithCache() {
+  const now = Date.now();
+  if (learnedPatternsCache && (now - learnedPatternsCacheTime) < CACHE_TTL_MS) {
+    return learnedPatternsCache;
+  }
+
+  if (fs.existsSync(LEARNED_CATEGORIES_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(LEARNED_CATEGORIES_PATH, 'utf8'));
+      learnedPatternsCache = data.patterns || [];
+      learnedPatternsCacheTime = now;
+      return learnedPatternsCache;
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Load learned categories and merge with static hierarchy
+ */
+function getEffectiveHierarchy() {
+  // Start with static hierarchy
+  const hierarchy = JSON.parse(JSON.stringify(CATEGORY_HIERARCHY));
+  const categoryToParent = { ...CATEGORY_TO_PARENT };
+
+  // Load learned patterns (cached)
+  const patterns = loadLearnedPatternsWithCache();
+
+  for (const pattern of patterns) {
+    const categoryName = pattern.suggestedName || pattern.patternKey;
+    const parentName = pattern.suggestedParent || pattern.parentCategory || 'Browsing';
+
+    // Add to parent category's children
+    if (hierarchy[parentName]) {
+      if (!hierarchy[parentName].children.includes(categoryName)) {
+        hierarchy[parentName].children.push(categoryName);
+      }
+    }
+
+    // Add to reverse lookup
+    categoryToParent[categoryName] = parentName;
+  }
+
+  return { hierarchy, categoryToParent, patterns };
+}
+
+/**
+ * Aggregate category breakdown by parent category
+ */
+function aggregateByParentCategory(categoryBreakdown, categoryDetails) {
+  const { hierarchy, categoryToParent, patterns } = getEffectiveHierarchy();
+  const parentAggregates = {};
+
+  for (const cat of categoryBreakdown) {
+    const parentName = categoryToParent[cat.category] || 'Other';
+    const parentConfig = hierarchy[parentName] || hierarchy['Other'];
+
+    if (!parentAggregates[parentName]) {
+      parentAggregates[parentName] = {
+        category: parentName,
+        label: parentName,
+        color: parentConfig.color,
+        minutes: 0,
+        record_count: 0,
+        subcategories: []
+      };
+    }
+
+    parentAggregates[parentName].minutes += cat.minutes;
+    parentAggregates[parentName].record_count += cat.record_count;
+
+    // Get label - check learned patterns for custom labels
+    let label = CATEGORY_LABELS[cat.category];
+    let color = CATEGORY_COLORS[cat.category];
+
+    if (!label) {
+      // Check if it's a learned pattern (use cached patterns)
+      const learnedPattern = patterns.find(
+        p => (p.suggestedName || p.patternKey) === cat.category
+      );
+      if (learnedPattern) {
+        label = learnedPattern.suggestedLabel || learnedPattern.patternKey;
+        // Use parent's color for learned categories
+        color = parentConfig.color;
+      } else {
+        // Fallback: capitalize the category name
+        label = cat.category.charAt(0).toUpperCase() + cat.category.slice(1).replace(/_/g, ' ');
+      }
+    }
+
+    parentAggregates[parentName].subcategories.push({
+      category: cat.category,
+      label: label,
+      color: color || CATEGORY_COLORS.other,
+      minutes: cat.minutes,
+      record_count: cat.record_count,
+      details: categoryDetails[cat.category] || []
+    });
+  }
+
+  // Sort subcategories by minutes descending
+  for (const parent of Object.values(parentAggregates)) {
+    parent.subcategories.sort((a, b) => b.minutes - a.minutes);
+  }
+
+  // Convert to array and sort by minutes descending
+  return Object.values(parentAggregates).sort((a, b) => b.minutes - a.minutes);
+}
 
 /**
  * Get today's date in YYYY-MM-DD format
@@ -112,6 +228,16 @@ function getDataForDate(date) {
 
     db.close();
 
+    // Build flat category breakdown with colors/labels
+    const flatCategoryBreakdown = categoryBreakdown.map(c => ({
+      ...c,
+      color: CATEGORY_COLORS[c.category] || CATEGORY_COLORS.other,
+      label: CATEGORY_LABELS[c.category] || 'Other'
+    }));
+
+    // Build hierarchical category breakdown
+    const hierarchicalBreakdown = aggregateByParentCategory(categoryBreakdown, categoryDetails);
+
     return {
       date,
       summary: {
@@ -119,11 +245,8 @@ function getDataForDate(date) {
         total_idle_minutes: Math.round((totals?.idle_records || 0) * 5 / 60),
         context_switches: switches
       },
-      category_breakdown: categoryBreakdown.map(c => ({
-        ...c,
-        color: CATEGORY_COLORS[c.category] || CATEGORY_COLORS.other,
-        label: CATEGORY_LABELS[c.category] || 'Other'
-      })),
+      category_breakdown: flatCategoryBreakdown,
+      category_hierarchy: hierarchicalBreakdown,
       category_details: categoryDetails,
       hourly_pattern: hourlyPattern,
       top_apps: topApps.map(a => ({

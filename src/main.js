@@ -43,6 +43,34 @@ const { getCategoryLabel, getCategoryColor } = categorize || {};
 
 let tray = null;
 let statsUpdateInterval = null;
+let dashboardServer = null;
+
+/**
+ * Start the dashboard server inside Electron
+ */
+function startDashboardServer() {
+  try {
+    const express = require('express');
+    const cors = require('cors');
+    const { PORT } = require('./config/constants');
+    const apiRoutes = require('./routes/api');
+
+    const app = express();
+    app.use(cors());
+    app.use(express.json());
+    app.use(express.static(path.join(__dirname, '..', 'public')));
+    app.use('/api', apiRoutes);
+    app.get('/', (req, res) => {
+      res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+    });
+
+    dashboardServer = app.listen(PORT, () => {
+      console.log(`✓ Dashboard server running at http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Failed to start dashboard server:', err.message);
+  }
+}
 
 // Show in dock so user knows app is running
 // (remove the app.dock.hide() call)
@@ -111,19 +139,10 @@ async function buildMenu() {
       }
     },
     {
-      label: "View Today's Dashboard",
-      click: async () => {
-        try {
-          const { execSync } = require('child_process');
-          const dashboardScript = path.join(__dirname, '..', 'scripts', 'quick-dashboard.js');
-          const outputPath = execSync(`node "${dashboardScript}"`, {
-            cwd: path.join(__dirname, '..'),
-            encoding: 'utf8'
-          }).trim();
-          shell.openPath(outputPath);
-        } catch (error) {
-          console.error('Failed to open dashboard:', error);
-        }
+      label: "Open Dashboard",
+      click: () => {
+        const { PORT } = require('./config/constants');
+        shell.openExternal(`http://localhost:${PORT}`);
       }
     },
     {
@@ -258,6 +277,9 @@ async function init() {
   startCapture();
   console.log('✓ Activity tracking started (captures every 5 seconds)');
 
+  // Start the dashboard server
+  startDashboardServer();
+
   // Update stats in the menu every 30 seconds
   statsUpdateInterval = setInterval(updateTray, 30000);
 
@@ -273,9 +295,16 @@ const gotTheLock = app.requestSingleInstanceLock();
 console.log('Single instance lock:', gotTheLock ? 'acquired' : 'FAILED (another instance running?)');
 
 if (!gotTheLock) {
-  console.log('Another instance is already running. Exiting.');
+  console.log('Another instance is already running. Opening dashboard in existing instance...');
   app.quit();
 } else {
+  // When second instance tries to start, open the dashboard
+  app.on('second-instance', () => {
+    console.log('Second instance attempted to start - opening dashboard');
+    const { PORT } = require('./config/constants');
+    shell.openExternal(`http://localhost:${PORT}`);
+  });
+
   // App lifecycle
   console.log('Waiting for app to be ready...');
 
@@ -303,6 +332,10 @@ if (!gotTheLock) {
 
     if (statsUpdateInterval) {
       clearInterval(statsUpdateInterval);
+    }
+
+    if (dashboardServer) {
+      dashboardServer.close();
     }
 
     if (closeDatabase) closeDatabase();
