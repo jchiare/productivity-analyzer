@@ -295,9 +295,16 @@ const gotTheLock = app.requestSingleInstanceLock();
 console.log('Single instance lock:', gotTheLock ? 'acquired' : 'FAILED (another instance running?)');
 
 if (!gotTheLock) {
-  console.log('Another instance is already running. Exiting.');
+  console.log('Another instance is already running. Opening dashboard in existing instance...');
   app.quit();
 } else {
+  // When second instance tries to start, open the dashboard
+  app.on('second-instance', () => {
+    console.log('Second instance attempted to start - opening dashboard');
+    const { PORT } = require('./config/constants');
+    shell.openExternal(`http://localhost:${PORT}`);
+  });
+
   // App lifecycle
   console.log('Waiting for app to be ready...');
 
